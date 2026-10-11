@@ -1,0 +1,35 @@
+{
+  "name": "simplified-iptool",
+  "version": "1.3.8",
+  "description": "Network scanner utility for identifying DVR/NVR/IP camera devices by vendor",
+  "private": true,
+  "main": "./out/main/index.js",
+  "author": "Simplified Developers",
+  "scripts": {
+    "dev": "electron-vite dev",
+    "build": "electron-vite build",
+    "start": "electron-vite preview",
+    "typecheck": "tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.web.json",
+    "build:unv-native": "npm run build --prefix native/uniview",
+    "build:tvt-native": "npm run build --prefix native/tvt",
+    "build:dahua-native": "npm run build --prefix native/dahua",
+    "dist:win": "npm run build && electron-builder --win"
+  },
+  "dependencies": {
+    "node-addon-api": "^8.3.0",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.2",
+    "@types/react": "^18.3.12",
+    "@types/react-dom": "^18.3.1",
+    "@vitejs/plugin-react": "^4.3.4",
+    "electron": "^33.2.0",
+    "electron-builder": "^25.1.8",
+    "electron-vite": "^2.3.0",
+    "node-gyp": "^10.2.0",
+    "typescript": "^5.7.2",
+    "vite": "^5.4.11"
+  }
+}

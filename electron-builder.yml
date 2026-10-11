@@ -1,0 +1,29 @@
+appId: net.simplifieddevs.iptool
+productName: Simplified IP-Tool
+directories:
+  output: release
+files:
+  - out/**/*
+  - package.json
+# The native discovery addons (.node + their SDK runtime DLLs) must live
+# outside app.asar as plain files on disk — Windows can't LoadLibrary a
+# DLL from inside an asar archive. resourcesPath at runtime is
+# resources/native/... to match each service's resolveAddonPath().
+extraResources:
+  - from: native/uniview/build/Release
+    to: native/uniview/build/Release
+  - from: native/tvt/build/Release
+    to: native/tvt/build/Release
+  - from: native/dahua/build/Release
+    to: native/dahua/build/Release
+win:
+  target: nsis
+  artifactName: ${productName}-Setup-${version}.${ext}
+  icon: build/icon.ico
+nsis:
+  oneClick: false
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  installerIcon: build/icon.ico
+  uninstallerIcon: build/icon.ico

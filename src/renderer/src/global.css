@@ -1,0 +1,75 @@
+/* Same palette as SSM-VMS (src/renderer/src/global.css there) for a
+   consistent brand look across both apps — copied rather than shared
+   since these are separate repos. */
+:root,
+:root[data-theme='dark'] {
+  --bg: #0a0e13;
+  --panel: #12181f;
+  --surface: #1a212b;
+  --surface-hover: #212a35;
+  --border: #232b36;
+  --border-light: #2e3947;
+  --text: #e8edf2;
+  --text-muted: #8b98a5;
+  --text-faint: #5a6672;
+  --accent: #00007f;
+  --accent-hover: #1a1aa8;
+  --accent-pressed: #00005c;
+  --accent-text: #ffffff;
+  --accent-faint: rgba(26, 26, 168, 0.18);
+  --accent-glow: rgba(26, 26, 168, 0.14);
+  --danger: #ef4444;
+  --warning: #f59e0b;
+  --success: #22c55e;
+  color-scheme: dark;
+}
+
+:root[data-theme='light'] {
+  /* Light blue page with white panels/cards for contrast (the table and
+     dialogs stay white; the page and header strips/inputs get the blue). */
+  --bg: #e6eef8;
+  --panel: #ffffff;
+  --surface: #eaf2fb;
+  --surface-hover: #d8e6f6;
+  --border: #c7d7e8;
+  --border-light: #b1c4db;
+  --text: #15202c;
+  --text-muted: #4f5e6e;
+  --text-faint: #8493a4;
+  --accent: #00007f;
+  --accent-hover: #1a1aa8;
+  --accent-pressed: #00005c;
+  --accent-text: #ffffff;
+  --accent-faint: rgba(0, 0, 127, 0.1);
+  --accent-glow: rgba(0, 0, 127, 0.08);
+  --danger: #dc2626;
+  --warning: #b45309;
+  --success: #15803d;
+  color-scheme: light;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+}
+
+body {
+  font-family: -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+button {
+  font-family: inherit;
+}
+
+input,
+select {
+  font-family: inherit;
+}

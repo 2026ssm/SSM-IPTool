@@ -1,0 +1,9 @@
+{
+  "name": "tvt-native",
+  "version": "0.1.0",
+  "private": true,
+  "gypfile": true,
+  "scripts": {
+    "build": "node-gyp rebuild && node scripts/copy-runtime-deps.js"
+  }
+}
