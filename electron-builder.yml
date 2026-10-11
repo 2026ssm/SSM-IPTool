@@ -1,5 +1,5 @@
 appId: net.simplifieddevs.iptool
-productName: Simplified IP-Tool
+productName: SSM-IPTool
 directories:
   output: release
 files:
