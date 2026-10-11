@@ -65,7 +65,7 @@ Step "Packaging the Windows installer"
 npx electron-builder --win
 if ($LASTEXITCODE -ne 0) { Fail "electron-builder failed." }
 
-$artifact = Get-ChildItem release -Filter "Simplified IP-Tool-Setup-*.exe" | Sort-Object LastWriteTime -Descending | Select-Object -First 1
+$artifact = Get-ChildItem release -Filter "SSM-IPTool-Setup-*.exe" | Sort-Object LastWriteTime -Descending | Select-Object -First 1
 if (-not $artifact) { Fail "No installer found in release\ ." }
 Write-Host "`nInstaller ready:" -ForegroundColor Green
 Write-Host "  $($artifact.FullName)"
