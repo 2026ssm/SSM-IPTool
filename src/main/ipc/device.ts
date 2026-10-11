@@ -2,16 +2,16 @@ import { ipcMain, shell } from 'electron';
 import { existsSync } from 'fs';
 import { join } from 'path';
 import { openDeviceBrowser } from '../deviceBrowser';
-import { modifyDahuaDevice } from '../services/dahuaDiscovery';
+import { modifyDahuaDevice, factoryResetDahuaDevice } from '../services/dahuaDiscovery';
 import { modifyTvtDevice, rebootTvtDevice } from '../services/tvtDiscovery';
 import { modifyUniviewDevice } from '../services/univiewDiscovery';
-import { readUniviewNetworkViaLapi } from '../services/univiewLapi';
-import { modifyOnvifDevice, readOnvifHttpPort, readOnvifNetwork, rebootOnvifDevice } from '../services/onvifNetwork';
-import { modifyHikvisionDevice, rebootHikvisionDevice } from '../services/hikvisionIsapi';
+import { readUniviewNetworkViaLapi, factoryResetUniviewViaLapi } from '../services/univiewLapi';
+import { modifyOnvifDevice, readOnvifHttpPort, readOnvifNetwork, rebootOnvifDevice, factoryResetOnvifDevice, hasOnvifService } from '../services/onvifNetwork';
+import { modifyHikvisionDevice, rebootHikvisionDevice, factoryResetHikvisionDevice } from '../services/hikvisionIsapi';
 import { modifyAxisDevice, readAxisNetworkForPrefill, rebootAxisDevice } from '../services/axisVapix';
 import { hasGateway, localIPv4Interfaces } from '../services/networkInterfaces';
 import { lastScanHosts, lastScanRowsFor } from '../services/scanResults';
-import type { ModifyNetworkRequest, ModifyNetworkResult, PortKind, PortSettings, RebootRequest } from '../../shared/types';
+import type { FactoryResetRequest, ModifyNetworkRequest, ModifyNetworkResult, PortKind, PortSettings, RebootRequest } from '../../shared/types';
 
 // Changing a device's network settings is a write against live hardware —
 // a bad IP/mask/gateway can leave a device unreachable until someone
@@ -238,6 +238,40 @@ export function registerDeviceIpcHandlers(): void {
       // Never log the request itself — it carries the device password.
       console.error(`[device] ${request.discoveryMethod} reboot failed:`, e);
       return { ok: false, error: `The reboot couldn't be sent (${e instanceof Error ? e.message : String(e)}).` };
+    }
+  });
+
+  // Factory reset from the Actions column: the same row-targeting rules as
+  // a reboot or an edit (host + MAC from the last scan). Each brand rides
+  // its own route — Dahua's SDK via its login, Uniview's LAPI, Hikvision's
+  // ISAPI, and a TVT camera via ONVIF (its SDK's reset is NVR-only) —
+  // checked to be present before anything is sent.
+  ipcMain.handle('device:factoryReset', async (_event, request: FactoryResetRequest): Promise<ModifyNetworkResult> => {
+    if (!request.password) return { ok: false, error: "The device's password is required." };
+    if (request.mode !== 'keep_network' && request.mode !== 'full') return { ok: false, error: 'Choose a reset mode first.' };
+    request = { ...request, username: request.username.trim() };
+    try {
+      switch (request.discoveryMethod) {
+        case 'Dahua':
+          return await factoryResetDahuaDevice(request);
+        case 'Uniview': {
+          const row = lastScanRowsFor(request.host).find((r) => r.discoveryMethod === 'Uniview');
+          return await factoryResetUniviewViaLapi(request.host, row?.currentPorts?.http ?? row?.port ?? 80, { username: request.username, password: request.password }, request.mode);
+        }
+        case 'TVT':
+          if (!hasOnvifService(request.host)) {
+            return { ok: false, error: "This TVT device doesn't answer ONVIF, and its own SDK doesn't offer a camera reset — reset it from its web page instead." };
+          }
+          return await factoryResetOnvifDevice(request);
+        case 'Hikvision SADP':
+          return await factoryResetHikvisionDevice(request);
+        default:
+          return { ok: false, error: `Factory reset isn't supported for ${request.discoveryMethod} yet.` };
+      }
+    } catch (e) {
+      // Never log the request itself — it carries the device password.
+      console.error(`[device] ${request.discoveryMethod} factory reset failed:`, e);
+      return { ok: false, error: `The reset couldn't be sent (${e instanceof Error ? e.message : String(e)}).` };
     }
   });
 

@@ -11,7 +11,7 @@ import { isOnLocalSubnet, localIPv4Interfaces } from '../services/networkInterfa
 import { vendorFromMac } from '../services/macVendors';
 import { readOnvifScanInfo } from '../services/onvifNetwork';
 import { setLastScan } from '../services/scanResults';
-import type { DiscoveredDevice } from '../../shared/types';
+import type { DiscoveredDevice, FactoryResetCapability } from '../../shared/types';
 
 // Originally left fully unmerged (one row per protocol match, however many
 // that turned out to be) — real live testing showed some devices answering
@@ -276,6 +276,36 @@ function markRebootable(devices: DiscoveredDevice[]): DiscoveredDevice[] {
   });
 }
 
+// Which rows the Factory reset action can reach (ipc/device.ts picks the
+// route), and which modes each route offers:
+//   - Uniview rows: its own LAPI reset (Mode 0 keeps the network + login,
+//     Mode 1 doesn't — on some models it also erases the SD card).
+//   - Dahua rows: its SDK's restore-default control (no-network mask) or
+//     CLIENT_ResetSystem — both on a logged-in TCP session, so only on the
+//     PC's subnet and only for rows the search has a full record for.
+//   - Hikvision SADP rows: ISAPI's factoryReset (basic / full) — the same
+//     reachability rules as the Edit route (activated, on the PC's subnet).
+//   - TVT rows: their SDK's reset is NVR-only, so the camera route is
+//     ONVIF's SetSystemFactoryDefault (Soft keeps the network) — offered
+//     only where the device also answers ONVIF on this subnet.
+// Deliberately hidden from rows known to be DVRs/NVRs (per request); a row
+// whose category no protocol confirmed still shows the action — the dialog
+// is the confirmation before anything destructive runs.
+function markFactoryResettable(devices: DiscoveredDevice[]): DiscoveredDevice[] {
+  const onvifHosts = new Set(devices.filter((d) => d.discoveryMethod === 'ONVIF').map((d) => d.host));
+  return devices.map((device) => {
+    if (device.otherSubnet || device.deviceCategory === 'dvr_nvr') return device;
+    let cap: FactoryResetCapability | undefined;
+    if (device.discoveryMethod === 'Uniview' || device.discoveryMethod === 'Dahua' || device.discoveryMethod === 'Hikvision SADP') {
+      cap = { keepNetwork: true, full: true, mayReboot: true };
+      if (device.discoveryMethod === 'Uniview') cap.fullNote = 'A full reset on some Uniview cameras also erases the SD card.';
+    } else if (device.discoveryMethod === 'TVT' && onvifHosts.has(device.host)) {
+      cap = { keepNetwork: true, full: true, mayReboot: true };
+    }
+    return cap ? { ...device, factoryReset: cap } : device;
+  });
+}
+
 // Each protocol runs isolated — one failing (most likely a native addon or
 // its SDK runtime DLL failing to load) used to reject the whole
 // Promise.all and throw away every other protocol's results, so a single
@@ -344,7 +374,7 @@ export function registerDiscoveryIpcHandlers(): void {
     } catch (error) {
       console.error('[discovery] mask/gateway fill-in failed, returning results without it:', error);
     }
-    const devices = markOnvifFallback(markRebootable(adjustEditCapabilities(brandFromMac(withAddressing))));
+    const devices = markOnvifFallback(markRebootable(markFactoryResettable(adjustEditCapabilities(brandFromMac(withAddressing)))));
     setLastScan(devices);
     return devices;
   });

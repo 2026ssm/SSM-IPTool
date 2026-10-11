@@ -1,4 +1,4 @@
-import type { ModifyNetworkRequest, ModifyNetworkResult, NetworkSettings, PortKind, PortSettings, RebootRequest } from '../../shared/types';
+import type { FactoryResetRequest, ModifyNetworkRequest, ModifyNetworkResult, NetworkSettings, PortKind, PortSettings, RebootRequest } from '../../shared/types';
 import { normalizeMac, waitForMacAt } from './arpLookup';
 import { deviceHttpRequest } from './deviceHttp';
 import { digestAuthorization, pickDigestChallenge } from './httpDigest';
@@ -385,6 +385,44 @@ export async function rebootHikvisionDevice(request: RebootRequest): Promise<Mod
     }
     await sendChange(at, REBOOT_PATH, creds);
     return { ok: true };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : String(e) };
+  }
+}
+
+// ---- Factory reset ----
+
+// ISAPI's own factory-reset endpoint, with ISAPI's recovery modes (the
+// query parameter ISAPI documents, not a body):
+//   - mode=basic: every parameter EXCEPT the network and user settings
+//     restored to default — the 'keep IP and login' reset;
+//   - mode=full: everything, the network and login included. The device
+//     comes back uninitialized at its factory address and has to be
+//     activated with a new password before anyone can use it.
+// The interface is read first (as for a reboot) to prove the login and
+// check it's the scanned device. The device reboots either way and may go
+// down before finishing its reply, so 'unanswered' counts as sent.
+const FACTORY_RESET_PATH = '/ISAPI/System/factoryReset';
+
+export async function factoryResetHikvisionDevice(request: FactoryResetRequest): Promise<ModifyNetworkResult> {
+  const row = lastScanRowsFor(request.host).find((d) => d.discoveryMethod === 'Hikvision SADP');
+  if (!row) return { ok: false, error: 'This device is no longer in the Hikvision search results. Scan again and retry.' };
+  const at: Target = { host: request.host, port: row.httpPort ?? 80 };
+  const creds: Credentials = { username: request.username, password: request.password };
+  try {
+    const scannedMac = normalizeMac(request.mac) ?? lastScanMacFor(request.host);
+    const iface = await readInterface(at, creds, scannedMac);
+    if (scannedMac && iface?.mac && iface.mac !== scannedMac) {
+      return { ok: false, error: `The device answering at ${request.host} (MAC ${iface.mac}) isn't the one the scan found (${scannedMac}). Nothing was reset — rescan and try again.` };
+    }
+    await sendChange(at, `${FACTORY_RESET_PATH}?mode=${request.mode === 'full' ? 'full' : 'basic'}`, creds, '');
+    return {
+      ok: true,
+      message:
+        request.mode === 'full'
+          ? 'The device is factory-resetting. All settings — its network settings and password included — are going back to factory defaults, and it reboots to apply them. When it comes back it is uninitialized, usually at its factory address, and needs activating with a new password.'
+          : 'The device is restoring factory defaults and reboots to apply them — it keeps its IP address and login, and should answer again in a minute or two (its other settings are back at factory defaults).',
+    };
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : String(e) };
   }

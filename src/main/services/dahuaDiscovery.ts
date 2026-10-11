@@ -1,6 +1,6 @@
 import { join } from 'path';
 import { app } from 'electron';
-import type { DeviceCategory, DiscoveredDevice, ModifyNetworkRequest, ModifyNetworkResult, PortSettings } from '../../shared/types';
+import type { DeviceCategory, DiscoveredDevice, FactoryResetRequest, ModifyNetworkRequest, ModifyNetworkResult, PortSettings } from '../../shared/types';
 import { normalizeMac } from './arpLookup';
 import { vendorFromMac } from './macVendors';
 import { isOnLocalSubnet, localIPv4Interfaces } from './networkInterfaces';
@@ -66,6 +66,10 @@ interface NativeAddon {
     password: string;
     localIp: string;
   }): Promise<NativeModifyResult>;
+  login(params: { host: string; port: number; username: string; password: string }): Promise<{ ok: boolean; sessionId?: number; errorCode?: number }>;
+  logout(sessionId: number): Promise<void>;
+  restoreDefault(sessionId: number): Promise<{ ok: boolean; missing?: boolean; errorCode?: number }>;
+  resetSystem(sessionId: number): Promise<{ ok: boolean; missing?: boolean; errorCode?: number }>;
 }
 
 // Every raw record from the most recent scan, in arrival order — several
@@ -170,6 +174,12 @@ const DAHUA_ERRORS: Record<number, string> = {
   104: 'The account is locked — too many failed attempts. Wait and try again later.',
 };
 
+// The login's own nError codes — a different enum from the one above.
+const DAHUA_LOGIN_ERRORS: Record<number, string> = {
+  1: 'Wrong username or password.',
+  5: 'The account is locked — too many failed attempts. Wait and try again later.',
+};
+
 // The local interface to send the modify command out of: the one sharing
 // the device's current subnet. For a device outside every local subnet the
 // NIC that heard it is unknown (the search ran on all of them), so it's left
@@ -251,6 +261,53 @@ async function confirmDahuaDhcp(mac: string, oldIp: string): Promise<ModifyNetwo
   return last.dhcp
     ? { ok: true, warning: 'The device switched to DHCP. Rescan in a minute to see the address it gets.' }
     : { ok: false, error: "The device reported success but is still answering with a static address — it didn't switch to DHCP." };
+}
+
+// Factory reset over a logged-in TCP session (a full reset needs the login;
+// the restore-default control runs on it too — see the addon's comments):
+//   - keep_network: CLIENT_ControlDevice's restore-default control sent
+//     with the no-network mask — everything restores EXCEPT the IP
+//     settings, and the device reboots and comes straight back.
+//   - full: CLIENT_ResetSystem — everything including the network and
+//     login. The device comes back at its factory address and defaults.
+// Both can drop their reply mid-send (the device reboots), so the
+// "no response" error is reported as sent-but-unconfirmed instead of
+// failed — the same lesson the port-confirms took from live testing.
+export async function factoryResetDahuaDevice(request: FactoryResetRequest): Promise<ModifyNetworkResult> {
+  const device = pickEditedDevice(lastSeen, request.host, request.mac);
+  if (!device) return { ok: false, error: 'This device is no longer in the Dahua search results. Scan again and retry.' };
+  const native = loadNative();
+  const login = await native.login({ host: device.host, port: device.port, username: request.username, password: request.password });
+  if (!login.ok || login.sessionId === undefined) {
+    const code = login.errorCode ?? 0;
+    return { ok: false, error: DAHUA_LOGIN_ERRORS[code] ?? `Couldn't log in to the device (Dahua error ${code}).` };
+  }
+  const sessionId = login.sessionId;
+  try {
+    const result =
+      request.mode === 'full' ? await native.resetSystem(sessionId) : await native.restoreDefault(sessionId);
+    if (result.missing) return { ok: false, error: 'The login session is gone — scan again and retry.' };
+    if (result.ok) {
+      return {
+        ok: true,
+        message:
+          request.mode === 'full'
+            ? 'The device is factory-resetting. All settings — its network settings and password included — are going back to factory defaults, and it reboots to apply them. Scan again in a few minutes to find it at its factory address and defaults.'
+            : 'The device is restoring factory defaults and reboots to apply them — it keeps its IP address and login, and should answer again in a minute or two (its other settings are back at factory defaults).',
+      };
+    }
+    const code = result.errorCode ?? 0;
+    if (code === 2) {
+      return {
+        ok: true,
+        warning: `The reset was sent, but the device didn't confirm it (it may already be rebooting). Rescan in a minute or two${request.mode === 'full' ? " — after a full reset it's back at its factory address and defaults" : ''}.`,
+      };
+    }
+    return { ok: false, error: `${request.mode === 'full' ? "The device refused the full reset" : "The device refused the factory reset"} (${DAHUA_ERRORS[code] ?? `Dahua error ${code}`})${code === 100 || code === 1 ? " — check the password." : '.'}` };
+  } finally {
+    // The session may already be gone with the device.
+    await native.logout(sessionId).catch(() => undefined);
+  }
 }
 
 export async function modifyDahuaDevice(request: ModifyNetworkRequest): Promise<ModifyNetworkResult> {

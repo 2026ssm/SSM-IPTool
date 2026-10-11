@@ -192,6 +192,15 @@ function rebootTargetFor(found: DiscoveredDevice, devices: DiscoveredDevice[]): 
   return devices.find((d) => d.host === found.host && d.rebootable);
 }
 
+// The row Factory reset acts through: this one, or another row for the same
+// host that main marked factory-resettable (e.g. a TVT row reset through
+// its ONVIF sibling is handled in main — here it's only about showing the
+// action on any row of the device at all).
+function factoryResetTargetFor(found: DiscoveredDevice, devices: DiscoveredDevice[]): DiscoveredDevice | undefined {
+  if (found.factoryReset) return found;
+  return devices.find((d) => d.host === found.host && d.factoryReset);
+}
+
 function vendorRowHostsOf(devices: DiscoveredDevice[]): Set<string> {
   return new Set(devices.filter((d) => d.discoveryMethod !== 'ONVIF').map((d) => d.host));
 }
@@ -236,6 +245,7 @@ export function App() {
   const [sort, setSort] = useState<{ key: SortKey; dir: SortDir } | null>(null);
   const [editingDevice, setEditingDevice] = useState<DiscoveredDevice | null>(null);
   const [rebootingDevice, setRebootingDevice] = useState<DiscoveredDevice | null>(null);
+  const [resettingDevice, setResettingDevice] = useState<DiscoveredDevice | null>(null);
   const [sadpResetDevice, setSadpResetDevice] = useState<DiscoveredDevice | null>(null);
   const [columnWidths, setColumnWidths] = useState<ColumnWidths>(loadColumnWidths);
   const columnWidthsRef = useRef(columnWidths);
@@ -245,7 +255,7 @@ export function App() {
   const scanningRef = useRef(scanning);
   scanningRef.current = scanning;
   const modalOpenRef = useRef(false);
-  modalOpenRef.current = Boolean(editingDevice || rebootingDevice || sadpResetDevice);
+  modalOpenRef.current = Boolean(editingDevice || rebootingDevice || resettingDevice || sadpResetDevice);
 
   useEffect(() => {
     applyThemeMode('light');
@@ -281,7 +291,8 @@ export function App() {
   }, [autoScan]);
 
   // Auto-scan: re-run the scan every 10s while the toggle is on, skipping a
-  // tick when a scan is already running or an Edit/Reboot/Reset dialog is
+  // tick when a scan is already running or an Edit, Reboot, Factory reset
+  // or SADP password-reset dialog is
   // open (so a background refresh never disrupts what the tech is doing).
   useEffect(() => {
     if (!autoScan) return;
@@ -426,7 +437,7 @@ export function App() {
               {scanning ? 'Scanning…' : 'Scan Network'}
             </button>
             <label
-              title="When on, the network is rescanned automatically every 10 seconds (paused while an Edit, Reboot or Reset dialog is open)."
+              title="When on, the network is rescanned automatically every 10 seconds (paused while an Edit, Reboot, Factory reset or Reset-password dialog is open)."
               style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', fontSize: '11px', color: theme.textMuted, cursor: 'pointer', whiteSpace: 'nowrap' }}
             >
               <input type="checkbox" checked={autoScan} onChange={(e) => setAutoScan(e.target.checked)} />
@@ -547,6 +558,15 @@ export function App() {
                       Reboot
                     </button>
                   )}
+                  {factoryResetTargetFor(found, devices) && (
+                    <button
+                      onClick={() => setResettingDevice(factoryResetTargetFor(found, devices) ?? null)}
+                      title="Restore this device to its factory defaults"
+                      style={{ ...linkStyle, background: 'none', border: 'none', padding: 0, cursor: 'pointer' }}
+                    >
+                      Factory reset…
+                    </button>
+                  )}
                   {found.passwordReset && (
                     <button
                       onClick={() => setSadpResetDevice(found)}
@@ -575,6 +595,7 @@ export function App() {
         />
       )}
       {rebootingDevice && <RebootDialog device={rebootingDevice} onClose={() => setRebootingDevice(null)} />}
+      {resettingDevice && <FactoryResetDialog device={resettingDevice} onClose={() => setResettingDevice(null)} />}
       {sadpResetDevice && <SadpResetDialog device={sadpResetDevice} onClose={() => setSadpResetDevice(null)} />}
       {aboutOpen && <AboutModal themeMode={resolvedThemeMode} onClose={() => setAboutOpen(false)} />}
     </div>
@@ -1315,6 +1336,177 @@ function RebootDialog({ device, onClose }: { device: DiscoveredDevice; onClose: 
             </>
           )}
         </div>
+      </div>
+    </div>
+  );
+}
+
+// Factory reset from the Actions column. The dialog is the confirmation:
+// it names which settings are kept and which are lost for the mode chosen,
+// and only the main button sends it. Like Reboot/Edit, a click outside
+// only closes it once it's done; the password is never kept. The main
+// button's label names the mode, so a full reset can't be sent by mistake.
+function FactoryResetDialog({ device, onClose }: { device: DiscoveredDevice; onClose: () => void }) {
+  const cap = device.factoryReset ?? { keepNetwork: true, full: true };
+  const [mode, setMode] = useState<'keep_network' | 'full'>('keep_network');
+  const [username, setUsername] = useState('admin');
+  const [password, setPassword] = useState('');
+  const [stage, setStage] = useState<'form' | 'sending' | 'done'>('form');
+  const [error, setError] = useState<string | null>(null);
+  const [warning, setWarning] = useState<string | null>(null);
+  const [message, setMessage] = useState<string | null>(null);
+
+  async function reset(): Promise<void> {
+    setStage('sending');
+    setError(null);
+    const result = await window.ipTool.device.factoryReset({
+      host: device.host,
+      discoveryMethod: device.discoveryMethod,
+      mac: device.mac,
+      mode,
+      username: username.trim(),
+      password,
+    });
+    setPassword('');
+    if (result.ok) {
+      setWarning(result.warning ?? null);
+      setMessage(result.message ?? null);
+      setStage('done');
+    } else {
+      setError(result.error);
+      setStage('form');
+    }
+  }
+
+  const keepsNetwork = mode === 'keep_network';
+
+  // Enter = the main button (Reset, then Close), as in Edit/Reboot.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent): void => {
+      if (e.key !== 'Enter' || e.repeat || (e.target instanceof HTMLElement && e.target.tagName === 'BUTTON')) return;
+      if (stage === 'form' && password) void reset();
+      else if (stage === 'done') onClose();
+      else return;
+      e.preventDefault();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  });
+
+  const radioStyle: CSSProperties = { display: 'flex', gap: '0.5rem', alignItems: 'flex-start', cursor: 'pointer' };
+
+  return (
+    <div
+      onMouseDown={(e) => {
+        if (e.target === e.currentTarget && stage === 'done') onClose();
+      }}
+      style={{
+        position: 'fixed',
+        inset: 0,
+        background: 'rgba(0, 0, 0, 0.55)',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        zIndex: 1000,
+      }}
+    >
+      <div
+        style={{
+          width: 430,
+          background: theme.panel,
+          border: `1px solid ${theme.border}`,
+          borderRadius: '8px',
+          boxShadow: '0 16px 48px rgba(0, 0, 0, 0.5)',
+        }}
+      >
+        <div style={{ padding: '1.1rem 1.25rem 0.9rem', borderBottom: `1px solid ${theme.border}` }}>
+          <div style={{ fontSize: '14px', fontWeight: 600, color: theme.text }}>Factory Reset Device</div>
+          <div style={{ fontSize: '11.5px', color: theme.textFaint, marginTop: '0.2rem' }}>
+            {displayName(device)} · {device.host} · via {device.discoveryMethod}
+          </div>
+        </div>
+
+        {stage !== 'done' ? (
+          <div style={{ padding: '1.25rem', display: 'flex', flexDirection: 'column', gap: '0.8rem' }}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.6rem' }}>
+              {cap.keepNetwork && (
+                <label style={radioStyle}>
+                  <input type="radio" name="factoryResetMode" checked={keepsNetwork} onChange={() => setMode('keep_network')} disabled={stage === 'sending'} />
+                  <span style={{ fontSize: '12px', color: theme.text, lineHeight: 1.5 }}>
+                    <span style={{ fontWeight: 600 }}>Restore defaults</span>
+                    {' — everything goes back to factory settings, but the device keeps its IP address and login, then reboots straight back.'}
+                  </span>
+                </label>
+              )}
+              {cap.full && (
+                <label style={radioStyle}>
+                  <input
+                    type="radio"
+                    name="factoryResetMode"
+                    checked={!keepsNetwork}
+                    onChange={() => setMode('full')}
+                    disabled={stage === 'sending'}
+                    style={{ marginTop: '0.15rem' }}
+                  />
+                  <span style={{ display: 'flex', flexDirection: 'column', fontSize: '12px', lineHeight: 1.5 }}>
+                    <span style={{ color: keepsNetwork ? theme.textMuted : theme.text }}>
+                      <span style={{ fontWeight: 600, color: theme.warning }}>Full factory reset</span>
+                      {' — resets everything, including the IP address and password. The device reboots back to its factory state and has to be found again by a fresh scan (and on some brands, activated with a new password before it can be used).'}
+                    </span>
+                    {cap.fullNote && <span style={{ color: theme.textMuted, marginTop: '0.3rem' }}>{cap.fullNote}</span>}
+                  </span>
+                </label>
+              )}
+            </div>
+            <Field label="Username">
+              <input value={username} onChange={(e) => setUsername(e.target.value)} disabled={stage === 'sending'} style={inputStyle} />
+            </Field>
+            <Field label="Password">
+              <PasswordInput value={password} onChange={setPassword} disabled={stage === 'sending'} />
+            </Field>
+            {error && <div style={{ fontSize: '11.5px', color: theme.danger }}>{error}</div>}
+          </div>
+        ) : null}
+
+        {stage === 'done' ? (
+          <div style={{ padding: '1.25rem', fontSize: '12px', color: theme.textMuted, lineHeight: 1.55 }}>
+            {message ? (
+              <div style={{ color: theme.success, marginBottom: '0.4rem' }}>{message}</div>
+            ) : keepsNetwork ? (
+              <>
+                <div style={{ color: theme.success, marginBottom: '0.4rem' }}>The reset is under way.</div>
+                The device keeps its IP address and login while everything else returns to factory defaults — it should answer again in a minute or two. Rescan to check.
+              </>
+            ) : (
+              <>
+                <div style={{ color: theme.warning, marginBottom: '0.4rem' }}>The device is factory-resetting.</div>
+                Everything — its address and password included — is going back to factory defaults. Scan again once it has rebooted to find it at its factory settings.
+              </>
+            )}
+            {warning && <div style={{ color: theme.warning, marginTop: '0.4rem' }}>{warning}</div>}
+          </div>
+        ) : null}
+
+        {stage !== 'done' ? (
+          <div style={{ padding: '0 1.25rem 1.25rem', display: 'flex', justifyContent: 'flex-end', gap: '0.6rem' }}>
+            <button onClick={onClose} disabled={stage === 'sending'} style={secondaryButtonStyle}>
+              Cancel
+            </button>
+            <button
+              onClick={reset}
+              disabled={!password || stage === 'sending'}
+              style={{ ...primaryButtonStyle, opacity: password && stage !== 'sending' ? 1 : 0.5 }}
+            >
+              {stage === 'sending' ? 'Resetting…' : keepsNetwork ? 'Reset device' : 'Full reset'}
+            </button>
+          </div>
+        ) : (
+          <div style={{ padding: '0 1.25rem 1.25rem', display: 'flex', justifyContent: 'flex-end' }}>
+            <button onClick={onClose} style={primaryButtonStyle}>
+              Close
+            </button>
+          </div>
+        )}
       </div>
     </div>
   );

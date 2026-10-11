@@ -1,7 +1,9 @@
-// N-API bridge over Dahua's General NetSDK — discovery plus the
-// search-level "modify device IP" command. Ported from SSM-VMS's own
+// N-API bridge over Dahua's General NetSDK — discovery, the search-level
+// "modify device IP" command, and a TCP login session for the
+// factory-reset commands (CLIENT_ControlDevice's restore-default control
+// and CLIENT_ResetSystem). Ported from SSM-VMS's own
 // native/dahua/src/addon.cc, stripped of everything this tool doesn't need
-// (login, live view, playback).
+// (live view, playback; the login itself is kept only for the resets).
 #include <napi.h>
 #include <windows.h>
 #include <cstring>
@@ -288,6 +290,227 @@ int GetInt(const Napi::Object& obj, const char* key) {
   return v.IsNumber() ? v.As<Napi::Number>().Int32Value() : 0;
 }
 
+// Logged-in SDK sessions, keyed by a small id handed to JS (the SDK's own
+// login handle stays as the map's value, never exposed). Both reset
+// commands run on a logged-in TCP session (EM_LOGIN_SPEC_CAP_TCP).
+std::mutex g_sessionMutex;
+std::map<int, LLONG> g_sessions;
+int g_nextSessionId = 1;
+constexpr int kResetWaitMs = 5000;
+
+LLONG SessionLoginId(int sessionId) {
+  std::lock_guard<std::mutex> lock(g_sessionMutex);
+  auto it = g_sessions.find(sessionId);
+  return it == g_sessions.end() ? 0 : it->second;
+}
+
+// CLIENT_LoginWithHighLevelSecurity (TCP login on the device port).
+// Resolves { ok, sessionId } or { ok: false, errorCode } with the login's
+// own nError (1 = wrong username or password, 5 = locked, ...), so the TS
+// side can map known codes to readable messages.
+class LoginWorker : public Napi::AsyncWorker {
+ public:
+  LoginWorker(Napi::Env env, std::string host, int port, std::string username, std::string password)
+      : Napi::AsyncWorker(env),
+        deferred_(Napi::Promise::Deferred::New(env)),
+        host_(std::move(host)),
+        port_(port),
+        username_(std::move(username)),
+        password_(std::move(password)) {}
+
+  void Execute() override {
+    NET_IN_LOGIN_WITH_HIGHLEVEL_SECURITY in;
+    std::memset(&in, 0, sizeof(in));
+    in.dwSize = sizeof(in);
+    CopyField(in.szIP, sizeof(in.szIP), host_);
+    in.nPort = port_;
+    CopyField(in.szUserName, sizeof(in.szUserName), username_);
+    CopyField(in.szPassWord, sizeof(in.szPassWord), password_);
+    in.emSpecCap = EM_LOGIN_SPEC_CAP_TCP;
+    NET_OUT_LOGIN_WITH_HIGHLEVEL_SECURITY out;
+    std::memset(&out, 0, sizeof(out));
+    out.dwSize = sizeof(out);
+    const LLONG loginId = CLIENT_LoginWithHighLevelSecurity(&in, &out);
+    SecureZeroMemory(&in, sizeof(in));
+    if (!password_.empty()) SecureZeroMemory(&password_[0], password_.size());
+    if (!loginId) {
+      errorCode_ = out.nError;
+      return;
+    }
+    {
+      std::lock_guard<std::mutex> lock(g_sessionMutex);
+      sessionId_ = g_nextSessionId++;
+      g_sessions[sessionId_] = loginId;
+    }
+    ok_ = true;
+  }
+
+  void OnOK() override {
+    Napi::Env env = Env();
+    Napi::Object result = Napi::Object::New(env);
+    result.Set("ok", Napi::Boolean::New(env, ok_));
+    if (ok_) result.Set("sessionId", Napi::Number::New(env, sessionId_));
+    else result.Set("errorCode", Napi::Number::New(env, static_cast<double>(errorCode_)));
+    deferred_.Resolve(result);
+  }
+
+  void OnError(const Napi::Error& e) override { deferred_.Reject(e.Value()); }
+
+  Napi::Promise GetPromise() { return deferred_.Promise(); }
+
+ private:
+  Napi::Promise::Deferred deferred_;
+  std::string host_;
+  int port_;
+  std::string username_;
+  std::string password_;
+  bool ok_ = false;
+  int sessionId_ = 0;
+  DWORD errorCode_ = 0;
+};
+
+// CLIENT_ControlDevice's restore-default control: with the mask below the
+// device restores every documented setting area EXCEPT the network one
+// (DH_RESTORE_NETWORK is deliberately omitted — the header documents the
+// value as an AND/OR-able mask), so the device keeps its IP settings and
+// comes back at the same address with the same login, then reboots. The
+// catch-all DH_RESTORE_ALL can't be used for that (it includes the
+// network), so the individual areas are listed.
+constexpr DWORD kRestoreDefaultKeepNetworkMask = DH_RESTORE_COMMON | DH_RESTORE_CODING | DH_RESTORE_VIDEO | DH_RESTORE_COMM |
+                                                 DH_RESTORE_ALARM | DH_RESTORE_VIDEODETECT | DH_RESTORE_PTZ |
+                                                 DH_RESTORE_OUTPUTMODE | DH_RESTORE_CHANNELNAME | DH_RESTORE_VIDEOINOPTIONS |
+                                                 DH_RESTORE_CPS | DH_RESTORE_INTELLIGENT | DH_RESTORE_REMOTEDEVICE |
+                                                 DH_RESTORE_DECODERVIDEOOUT | DH_RESTORE_LINKMODE | DH_RESTORE_COMPOSITE;
+
+class RestoreDefaultWorker : public Napi::AsyncWorker {
+ public:
+  RestoreDefaultWorker(Napi::Env env, int sessionId)
+      : Napi::AsyncWorker(env), deferred_(Napi::Promise::Deferred::New(env)), sessionId_(sessionId) {}
+
+  void Execute() override {
+    const LLONG loginId = SessionLoginId(sessionId_);
+    if (!loginId) {
+      missing_ = true;
+      return;
+    }
+    DWORD mask = kRestoreDefaultKeepNetworkMask;
+    {
+      std::lock_guard<std::mutex> lock(g_modifyMutex);
+      ok_ = CLIENT_ControlDevice(loginId, DH_CTRL_RESTOREDEFAULT, &mask, kResetWaitMs) == TRUE;
+      if (!ok_) errorCode_ = CLIENT_GetLastError() & 0x7fffffff;
+    }
+  }
+
+  void OnOK() override {
+    Napi::Env env = Env();
+    Napi::Object result = Napi::Object::New(env);
+    result.Set("ok", Napi::Boolean::New(env, ok_));
+    if (missing_) result.Set("missing", Napi::Boolean::New(env, true));
+    if (!ok_ && !missing_) result.Set("errorCode", Napi::Number::New(env, static_cast<double>(errorCode_)));
+    deferred_.Resolve(result);
+  }
+
+  void OnError(const Napi::Error& e) override { deferred_.Reject(e.Value()); }
+
+  Napi::Promise GetPromise() { return deferred_.Promise(); }
+
+ private:
+  Napi::Promise::Deferred deferred_;
+  int sessionId_;
+  bool ok_ = false;
+  bool missing_ = false;
+  DWORD errorCode_ = 0;
+};
+
+// CLIENT_ResetSystem: the full factory reset, network settings and login
+// included. The device reboots (often before finishing its reply — a FALSE
+// with "no response" is reported as unconfirmed rather than failed, and
+// the TS side words its result accordingly).
+class ResetSystemWorker : public Napi::AsyncWorker {
+ public:
+  ResetSystemWorker(Napi::Env env, int sessionId)
+      : Napi::AsyncWorker(env), deferred_(Napi::Promise::Deferred::New(env)), sessionId_(sessionId) {}
+
+  void Execute() override {
+    const LLONG loginId = SessionLoginId(sessionId_);
+    if (!loginId) {
+      missing_ = true;
+      return;
+    }
+    NET_IN_RESET_SYSTEM in;
+    std::memset(&in, 0, sizeof(in));
+    in.dwSize = sizeof(in);
+    NET_OUT_RESET_SYSTEM out;
+    std::memset(&out, 0, sizeof(out));
+    out.dwSize = sizeof(out);
+    {
+      std::lock_guard<std::mutex> lock(g_modifyMutex);
+      ok_ = CLIENT_ResetSystem(loginId, &in, &out, kResetWaitMs) == TRUE;
+      if (!ok_) errorCode_ = CLIENT_GetLastError() & 0x7fffffff;
+    }
+  }
+
+  void OnOK() override {
+    Napi::Env env = Env();
+    Napi::Object result = Napi::Object::New(env);
+    result.Set("ok", Napi::Boolean::New(env, ok_));
+    if (missing_) result.Set("missing", Napi::Boolean::New(env, true));
+    if (!ok_ && !missing_) result.Set("errorCode", Napi::Number::New(env, static_cast<double>(errorCode_)));
+    deferred_.Resolve(result);
+  }
+
+  void OnError(const Napi::Error& e) override { deferred_.Reject(e.Value()); }
+
+  Napi::Promise GetPromise() { return deferred_.Promise(); }
+
+ private:
+  Napi::Promise::Deferred deferred_;
+  int sessionId_;
+  bool ok_ = false;
+  bool missing_ = false;
+  DWORD errorCode_ = 0;
+};
+
+// login({ host, port, username, password }) → { ok, sessionId | errorCode }
+Napi::Value Login(const Napi::CallbackInfo& info) {
+  Napi::Env env = info.Env();
+  Napi::Object params = info[0].As<Napi::Object>();
+  auto* worker = new LoginWorker(env, GetString(params, "host"), GetInt(params, "port"), GetString(params, "username"), GetString(params, "password"));
+  Napi::Promise promise = worker->GetPromise();
+  worker->Queue();
+  return promise;
+}
+
+// logout(sessionId) — best effort; the session is gone either way.
+Napi::Value Logout(const Napi::CallbackInfo& info) {
+  const int sessionId = info[0].IsNumber() ? info[0].As<Napi::Number>().Int32Value() : 0;
+  std::lock_guard<std::mutex> lock(g_sessionMutex);
+  auto it = g_sessions.find(sessionId);
+  if (it != g_sessions.end()) {
+    CLIENT_Logout(it->second);
+    g_sessions.erase(it);
+  }
+  return info.Env().Undefined();
+}
+
+// restoreDefault(sessionId) → { ok | missing | errorCode }
+Napi::Value RestoreDefault(const Napi::CallbackInfo& info) {
+  const int sessionId = info[0].IsNumber() ? info[0].As<Napi::Number>().Int32Value() : 0;
+  auto* worker = new RestoreDefaultWorker(info.Env(), sessionId);
+  Napi::Promise promise = worker->GetPromise();
+  worker->Queue();
+  return promise;
+}
+
+// resetSystem(sessionId) → { ok | missing | errorCode }
+Napi::Value ResetSystem(const Napi::CallbackInfo& info) {
+  const int sessionId = info[0].IsNumber() ? info[0].As<Napi::Number>().Int32Value() : 0;
+  auto* worker = new ResetSystemWorker(info.Env(), sessionId);
+  Napi::Promise promise = worker->GetPromise();
+  worker->Queue();
+  return promise;
+}
+
 }  // namespace
 
 Napi::Value ModifyDevice(const Napi::CallbackInfo& info) {
@@ -366,6 +589,10 @@ Napi::Object Init(Napi::Env env, Napi::Object exports) {
   exports.Set("stopDiscovery", Napi::Function::New(env, StopDiscovery));
   exports.Set("modifyDevice", Napi::Function::New(env, ModifyDevice));
   exports.Set("searchByIps", Napi::Function::New(env, SearchByIps));
+  exports.Set("login", Napi::Function::New(env, Login));
+  exports.Set("logout", Napi::Function::New(env, Logout));
+  exports.Set("restoreDefault", Napi::Function::New(env, RestoreDefault));
+  exports.Set("resetSystem", Napi::Function::New(env, ResetSystem));
   return exports;
 }
 

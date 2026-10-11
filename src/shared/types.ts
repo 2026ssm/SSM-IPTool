@@ -85,6 +85,9 @@ export interface DiscoveredDevice {
   dhcp?: boolean;
   // The Reboot action can reach this row's device (see ipc/discovery.ts).
   rebootable?: boolean;
+  // The Factory reset action can reach this row's device, and which modes
+  // that brand's route offers (see ipc/discovery.ts's markFactoryResettable).
+  factoryReset?: FactoryResetCapability;
   // A Hikvision device that reports it supports a forgotten-admin-password
   // reset (SADP's own flags), and which methods — shown as a marker in the
   // table. `importFile` is the export-request-XML / import-signed-XML flow.
@@ -187,3 +190,41 @@ export interface RebootRequest {
 // "accepted" message. `message` replaces the dialog's own success text
 // with what the route found out (e.g. the address a device got by DHCP).
 export type ModifyNetworkResult = { ok: true; warning?: string; message?: string } | { ok: false; error: string };
+
+// The two shapes a factory reset can take, the way every supported brand
+// splits it (Uniview LAPI Mode 0/1, Hikvision ISAPI basic/full, ONVIF
+// Soft/Hard, Dahua's restore-mask with or without NETWORK):
+//   - keep_network: everything returns to factory defaults EXCEPT the IP
+//     settings and the admin login — the device reboots and comes straight
+//     back at the same address, still answering the same password.
+//   - full: everything resets including the IP settings and login. The
+//     device comes back at its factory address (often a different subnet)
+//     and may need activating with a new password before it's usable.
+export type FactoryResetMode = 'keep_network' | 'full';
+
+// Factory reset from the Actions column: the row's device, found the same
+// way as a reboot or an edit (host + MAC), with its login and the chosen
+// mode.
+export interface FactoryResetRequest {
+  host: string;
+  discoveryMethod: string;
+  // MAC of the row being reset, so each route targets that exact device
+  // even when several devices answered from the same IP.
+  mac?: string;
+  mode: FactoryResetMode;
+  username: string;
+  password: string;
+}
+
+// What the Factory reset action can do on this row's device:
+//   - keepNetwork/full: which modes the route offers (undefined mode means
+//     the button isn't shown for that choice).
+//   - mayReboot: the device reboots to apply either reset.
+//   - fullNote: a brand-specific warning shown with the full-reset choice
+//     (e.g. Uniview's full reset may also erase the SD card).
+export interface FactoryResetCapability {
+  keepNetwork: boolean;
+  full: boolean;
+  mayReboot?: boolean;
+  fullNote?: string;
+}

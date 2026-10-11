@@ -1,5 +1,5 @@
 import { contextBridge, ipcRenderer } from 'electron';
-import type { DiscoveredDevice, ModifyNetworkRequest, ModifyNetworkResult, PortSettings, RebootRequest } from '../shared/types';
+import type { DiscoveredDevice, FactoryResetRequest, ModifyNetworkRequest, ModifyNetworkResult, PortSettings, RebootRequest } from '../shared/types';
 
 const discovery = {
   scan: (): Promise<DiscoveredDevice[]> => ipcRenderer.invoke('discovery:scan'),
@@ -11,6 +11,7 @@ const device = {
   openWebPage: (host: string): Promise<void> => ipcRenderer.invoke('device:openWebPage', host),
   openSadpTool: (): Promise<ModifyNetworkResult> => ipcRenderer.invoke('device:openSadpTool'),
   reboot: (request: RebootRequest): Promise<ModifyNetworkResult> => ipcRenderer.invoke('device:reboot', request),
+  factoryReset: (request: FactoryResetRequest): Promise<ModifyNetworkResult> => ipcRenderer.invoke('device:factoryReset', request),
   readNetwork: (host: string, discoveryMethod: string): Promise<{ subnetMask?: string; gateway?: string; ports?: PortSettings; dhcp?: boolean }> =>
     ipcRenderer.invoke('device:readNetwork', host, discoveryMethod),
   readNetworkAuth: (

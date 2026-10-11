@@ -1,4 +1,4 @@
-import type { ModifyNetworkResult, PortSettings } from '../../shared/types';
+import type { FactoryResetMode, ModifyNetworkResult, PortSettings } from '../../shared/types';
 import { deviceHttpRequest } from './deviceHttp';
 import { digestAuthorization, pickDigestChallenge } from './httpDigest';
 
@@ -221,4 +221,37 @@ export async function readUniviewNetworkViaLapi(
   const dhcpRaw = deepFind(data, (k) => /^dhcp(enable)?$/i.test(k));
   const dhcp = typeof dhcpRaw === 'boolean' ? dhcpRaw : typeof dhcpRaw === 'number' ? dhcpRaw === 1 : undefined;
   return { subnetMask, gateway, dhcp };
+}
+
+// Factory reset over LAPI — the same call the camera's own maintenance page
+// (page/common/config_manage) makes: PUT /LAPI/V1.0/System/FactoryReset
+// with a Mode value. Mode 0 restores the default configuration while
+// keeping the IP settings and the user accounts; Mode 1 is the page's
+// "restore all settings to defaults without keeping current network and
+// user settings" choice (and on some models also erases the SD card).
+// Either way the camera reboots, so a dropped reply isn't a failure — the
+// no-response path resolves as sent, with a warning to rescan.
+const FACTORY_RESET_PATH = '/LAPI/V1.0/System/FactoryReset';
+
+export async function factoryResetUniviewViaLapi(host: string, httpPort: number, creds: Credentials, mode: FactoryResetMode): Promise<ModifyNetworkResult> {
+  try {
+    await lapi(host, httpPort, 'PUT', FACTORY_RESET_PATH, creds, { Mode: mode === 'full' ? 1 : 0 });
+  } catch (e) {
+    if (e instanceof LapiError) {
+      if (e.kind === 'network') {
+        return { ok: true, warning: `The reset was sent, but the camera hasn't answered since (it reboots to apply it). Rescan in a minute or two${mode === 'full' ? " — after a full reset it's back at its factory address and login" : ''}.` };
+      }
+      if (e.kind === 'auth') return { ok: false, error: 'Wrong username or password.' };
+      if (e.kind === 'missing') return { ok: false, error: "This camera doesn't provide a reset endpoint (older firmware) — reset it from its own web page instead." };
+      return { ok: false, error: `The camera refused the reset: ${e.message}` };
+    }
+    return { ok: false, error: e instanceof Error ? e.message : String(e) };
+  }
+  return {
+    ok: true,
+    message:
+      mode === 'full'
+        ? 'The camera is factory-resetting. All settings — including its address and login — are going back to factory defaults, and it reboots to apply them. Scan again in a few minutes to find it at its factory settings.'
+        : 'The camera is restoring factory defaults and reboots to apply them — it keeps its IP address and login, and should answer again in a minute or two (its other settings are back at factory defaults).',
+  };
 }

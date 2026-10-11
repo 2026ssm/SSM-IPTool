@@ -1,5 +1,5 @@
 import { createHash, randomBytes } from 'crypto';
-import type { ModifyNetworkRequest, ModifyNetworkResult, PortKind, PortSettings, RebootRequest } from '../../shared/types';
+import type { FactoryResetRequest, ModifyNetworkRequest, ModifyNetworkResult, PortKind, PortSettings, RebootRequest } from '../../shared/types';
 import { normalizeMac, waitForMacAt } from './arpLookup';
 import { deviceHttpRequest } from './deviceHttp';
 import { digestAuthorization, pickDigestChallenge } from './httpDigest';
@@ -457,6 +457,45 @@ export async function rebootOnvifDevice(request: RebootRequest): Promise<ModifyN
       return {
         ok: false,
         error: "The camera refused the login over ONVIF — the only way this app can reboot it. If the same username and password work on its web page, reboot it from there.",
+      };
+    }
+    return { ok: false, error: e instanceof Error ? e.message : String(e) };
+  }
+}
+
+// Factory reset over ONVIF SetSystemFactoryDefault: the route for brands
+// whose own SDK doesn't offer a camera reset (TVT's is documented NVR-only).
+// The interface is read first with the login (as for a reboot), which
+// checks the MAC, and then the reset is sent — Soft keeps the network and
+// the login (the ONVIF Core spec guarantees the device stays reachable at
+// the same IP after a soft reset), Hard resets everything including them.
+// Either way the camera reboots and may drop its reply mid-send, so no
+// response here isn't a failure.
+export async function factoryResetOnvifDevice(request: FactoryResetRequest): Promise<ModifyNetworkResult> {
+  const url = onvifDeviceServiceUrl(request.host);
+  if (!url) return { ok: false, error: "This device doesn't answer ONVIF, so it can't be factory-reset from here." };
+  const creds: Credentials = { username: request.username, password: request.password, clockOffsetMs: await clockOffsetMs(url) };
+  try {
+    const iface = parseFirstInterface(await call(url, 'GetNetworkInterfaces', '<tds:GetNetworkInterfaces/>', creds));
+    const scannedMac = normalizeMac(request.mac) ?? lastScanMacFor(request.host);
+    if (scannedMac && iface?.mac && iface.mac !== scannedMac) {
+      return { ok: false, error: `The device answering at ${request.host} (MAC ${iface.mac}) isn't the one the scan found (${scannedMac}). Nothing was reset — rescan and try again.` };
+    }
+    // The ONVIF wire values: Soft keeps the address/login, Hard doesn't.
+    const type = request.mode === 'full' ? 'Hard' : 'Soft';
+    try {
+      await call(url, 'SetSystemFactoryDefault', `<tds:SetSystemFactoryDefault><tds:FactoryDefaultType>${type}</tds:FactoryDefaultType></tds:SetSystemFactoryDefault>`, creds);
+    } catch (e) {
+      if (!(e instanceof OnvifError && e.kind === 'network')) throw e;
+    }
+    return { ok: true };
+  } catch (e) {
+    // As with the reboot: ONVIF is the only way this app reaches many of
+    // these devices, so "wrong password" alone can mislead.
+    if (e instanceof OnvifError && e.kind === 'auth') {
+      return {
+        ok: false,
+        error: "The camera refused the login over ONVIF — the only way this app can reset it. If the same username and password work on its web page, reset it from there.",
       };
     }
     return { ok: false, error: e instanceof Error ? e.message : String(e) };
