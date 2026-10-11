@@ -325,7 +325,7 @@ class LoginWorker : public Napi::AsyncWorker {
     CopyField(in.szIP, sizeof(in.szIP), host_);
     in.nPort = port_;
     CopyField(in.szUserName, sizeof(in.szUserName), username_);
-    CopyField(in.szPassWord, sizeof(in.szPassWord), password_);
+    CopyField(in.szPassword, sizeof(in.szPassword), password_);
     in.emSpecCap = EM_LOGIN_SPEC_CAP_TCP;
     NET_OUT_LOGIN_WITH_HIGHLEVEL_SECURITY out;
     std::memset(&out, 0, sizeof(out));
