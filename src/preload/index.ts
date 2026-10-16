@@ -26,6 +26,9 @@ const device = {
 
 const system = {
   getAppVersion: (): Promise<string> => ipcRenderer.invoke('system:getAppVersion'),
+  // Fetched in main (the renderer's CSP blocks external requests).
+  getPublicIp: (): Promise<string | null> => ipcRenderer.invoke('system:getPublicIp'),
+  checkPort: (host: string, port: number): Promise<'open' | 'closed'> => ipcRenderer.invoke('system:checkPort', host, port),
   minimizeWindow: (): Promise<void> => ipcRenderer.invoke('system:minimizeWindow'),
   toggleMaximizeWindow: (): Promise<void> => ipcRenderer.invoke('system:toggleMaximizeWindow'),
   closeWindow: (): Promise<void> => ipcRenderer.invoke('system:closeWindow'),

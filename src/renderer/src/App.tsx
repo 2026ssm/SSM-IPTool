@@ -533,53 +533,51 @@ export function App() {
       </div>
 
       <div style={{ flex: 1, minHeight: 0, padding: '1.25rem', display: 'flex', flexDirection: 'column' }}>
-        <div style={{ display: 'flex', alignItems: 'flex-end', gap: '1.25rem', marginBottom: '0.6rem' }}>
-          {/* Device Type — label on top of the selector, far left */}
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
-            <span style={{ fontSize: '11.5px', color: theme.textMuted }}>Device Type</span>
-            <select
-              value={deviceTypeFilter}
-              onChange={(e) => setDeviceTypeFilter(e.target.value as DeviceTypeFilter)}
-              style={selectStyle}
-            >
-              {DEVICE_TYPE_OPTIONS.map((opt) => (
-                <option key={opt.value} value={opt.value}>
-                  {opt.label}
-                </option>
-              ))}
-            </select>
-          </div>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr auto 1fr', alignItems: 'flex-end', gap: '1rem', marginBottom: '0.6rem' }}>
+          {/* LEFT: Device Type, then Devices Found + Search (labels centered) */}
+          <div style={{ display: 'flex', alignItems: 'flex-end', gap: '1.25rem', justifySelf: 'start' }}>
+            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '0.25rem' }}>
+              <span style={{ fontSize: '11.5px', color: theme.textMuted }}>Device Type</span>
+              <select
+                value={deviceTypeFilter}
+                onChange={(e) => setDeviceTypeFilter(e.target.value as DeviceTypeFilter)}
+                style={selectStyle}
+              >
+                {DEVICE_TYPE_OPTIONS.map((opt) => (
+                  <option key={opt.value} value={opt.value}>
+                    {opt.label}
+                  </option>
+                ))}
+              </select>
+            </div>
 
-          {/* Devices Found (green, flashing) on top of the Search field */}
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
-            <span className="iptool-flash" style={{ fontSize: '12.5px', fontWeight: 700, color: theme.success }}>
-              Devices Found {hasScanned && `(${visibleDevices.length})`}
-            </span>
-            <div style={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
-              <input
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-                placeholder="Search IP or MAC"
-                title="Filter the list by IP address or MAC address"
-                style={{ ...inputStyle, width: 190, padding: '0.35rem 1.4rem 0.35rem 0.5rem', fontSize: '12px' }}
-              />
-              {search && (
-                <button
-                  onClick={() => setSearch('')}
-                  title="Clear search"
-                  style={{ position: 'absolute', right: '0.3rem', background: 'none', border: 'none', color: theme.textMuted, cursor: 'pointer', fontSize: '14px', lineHeight: 1, padding: 0 }}
-                >
-                  ×
-                </button>
-              )}
+            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '0.25rem' }}>
+              <span className="iptool-flash" style={{ fontSize: '12.5px', fontWeight: 700, color: theme.success }}>
+                Devices Found {hasScanned && `(${visibleDevices.length})`}
+              </span>
+              <div style={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
+                <input
+                  value={search}
+                  onChange={(e) => setSearch(e.target.value)}
+                  placeholder="Search IP or MAC"
+                  title="Filter the list by IP address or MAC address"
+                  style={{ ...inputStyle, width: 190, padding: '0.35rem 1.4rem 0.35rem 0.5rem', fontSize: '12px' }}
+                />
+                {search && (
+                  <button
+                    onClick={() => setSearch('')}
+                    title="Clear search"
+                    style={{ position: 'absolute', right: '0.3rem', background: 'none', border: 'none', color: theme.textMuted, cursor: 'pointer', fontSize: '14px', lineHeight: 1, padding: 0 }}
+                  >
+                    ×
+                  </button>
+                )}
+              </div>
             </div>
           </div>
 
-          {/* Scan + auto-scan */}
-          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '0.3rem' }}>
-            <button onClick={handleScan} disabled={scanning} style={{ ...primaryButtonStyle, opacity: scanning ? 0.6 : 1 }}>
-              {scanning ? 'Scanning…' : 'Scan Network'}
-            </button>
+          {/* CENTER: Scan (auto-scan above the button) */}
+          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '0.3rem', justifySelf: 'center' }}>
             <label
               title="When on, the network is rescanned automatically every 10 seconds (paused while an Edit, Reboot, Factory reset or Reset-password dialog is open)."
               style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', fontSize: '11px', color: theme.textMuted, cursor: 'pointer', whiteSpace: 'nowrap' }}
@@ -587,10 +585,13 @@ export function App() {
               <input type="checkbox" checked={autoScan} onChange={(e) => setAutoScan(e.target.checked)} />
               Auto-scan every 10s
             </label>
+            <button onClick={handleScan} disabled={scanning} style={{ ...primaryButtonStyle, opacity: scanning ? 0.6 : 1 }}>
+              {scanning ? 'Scanning…' : 'Scan Network'}
+            </button>
           </div>
 
-          {/* Port forwarding fields — fill the space to the right of Scan */}
-          <div style={{ flex: 1, display: 'flex', justifyContent: 'flex-start' }}>
+          {/* RIGHT: Port forwarding fields, right-aligned */}
+          <div style={{ justifySelf: 'end' }}>
             <InlinePortCheck />
           </div>
         </div>
@@ -843,18 +844,13 @@ function InlinePortCheck() {
   const [result, setResult] = useState<{ status: 'checking' | 'open' | 'closed' } | null>(null);
 
   useEffect(() => {
-    const fill = (data: { ip?: string }): void => {
-      if (data.ip) setHost((h) => h || (data.ip as string));
-    };
-    fetch('https://api.ipify.org?format=json')
-      .then((r) => r.json())
-      .then(fill)
-      .catch(() => {
-        fetch('https://api64.ipify.org?format=json')
-          .then((r) => r.json())
-          .then(fill)
-          .catch(() => {});
-      });
+    // Looked up in main — the renderer's CSP blocks the external request.
+    window.ipTool.system
+      .getPublicIp()
+      .then((ip) => {
+        if (ip) setHost((h) => h || ip);
+      })
+      .catch(() => {});
   }, []);
 
   const handleCheck = () => {
@@ -863,20 +859,16 @@ function InlinePortCheck() {
     if (!portNum || portNum < 1 || portNum > 65535) return;
 
     setResult({ status: 'checking' });
-
-    fetch(`https://port-checker.alexgonz00.workers.dev/?host=${encodeURIComponent(host.trim())}&port=${portNum}`)
-      .then(r => r.json())
-      .then(data => {
-        setResult({ status: data.status === 'open' ? 'open' : 'closed' });
-      })
-      .catch(() => {
-        setResult({ status: 'closed' });
-      });
+    // Run in main (the renderer's CSP blocks the external request).
+    window.ipTool.system
+      .checkPort(host.trim(), portNum)
+      .then((status) => setResult({ status }))
+      .catch(() => setResult({ status: 'closed' }));
   };
 
   const checking = result?.status === 'checking';
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
+    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '0.25rem' }}>
       <span style={{ fontSize: '11.5px', color: theme.textMuted }}>Port Forwarding Check</span>
       <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
         <input
