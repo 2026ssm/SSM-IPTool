@@ -224,6 +224,13 @@ export function registerDeviceIpcHandlers(): void {
     if (url) openDeviceBrowser(url, host);
   });
 
+  // Opens the device's web UI in the user's own default browser instead of the
+  // in-app window, for techs who prefer it (password managers, extensions, etc.).
+  ipcMain.handle('device:openWebPageExternal', async (_event, host: string): Promise<void> => {
+    const url = await webPageUrl(host);
+    if (url) await shell.openExternal(url);
+  });
+
   // Opens Hikvision's own SADP tool so the tech can reset a forgotten admin
   // password there (export the request file, send it to Hikvision, import
   // the signed file). The app only launches the vendor tool — it never

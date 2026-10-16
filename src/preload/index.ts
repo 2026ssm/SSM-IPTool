@@ -9,6 +9,7 @@ const device = {
   modifyNetwork: (request: ModifyNetworkRequest): Promise<ModifyNetworkResult> =>
     ipcRenderer.invoke('device:modifyNetwork', request),
   openWebPage: (host: string): Promise<void> => ipcRenderer.invoke('device:openWebPage', host),
+  openWebPageExternal: (host: string): Promise<void> => ipcRenderer.invoke('device:openWebPageExternal', host),
   openSadpTool: (): Promise<ModifyNetworkResult> => ipcRenderer.invoke('device:openSadpTool'),
   reboot: (request: RebootRequest): Promise<ModifyNetworkResult> => ipcRenderer.invoke('device:reboot', request),
   factoryReset: (request: FactoryResetRequest): Promise<ModifyNetworkResult> => ipcRenderer.invoke('device:factoryReset', request),

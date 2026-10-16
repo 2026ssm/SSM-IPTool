@@ -135,6 +135,18 @@ const DEVICE_TYPE_OPTIONS: { value: DeviceTypeFilter; label: string }[] = [
   { value: 'onvif', label: 'ONVIF' },
 ];
 
+// Search filter: matches the typed text against the IP (substring) or the MAC
+// (substring, and also ignoring separators so "0011aa" matches "00:11:AA:…").
+function matchesSearch(found: DiscoveredDevice, term: string): boolean {
+  const q = term.trim().toLowerCase();
+  if (!q) return true;
+  if (found.host.toLowerCase().includes(q)) return true;
+  const mac = (found.mac ?? '').toLowerCase();
+  if (mac.includes(q)) return true;
+  const qHex = q.replace(/[^a-f0-9]/g, '');
+  return qHex.length > 0 && mac.replace(/[^a-f0-9]/g, '').includes(qHex);
+}
+
 function filterByDeviceType(devices: DiscoveredDevice[], filter: DeviceTypeFilter, vendorRowHosts: Set<string>): DiscoveredDevice[] {
   if (filter === 'all') return devices;
   if (filter === 'onvif') return devices.filter((d) => d.discoveryMethod === 'ONVIF');
@@ -336,6 +348,7 @@ export function App() {
   const [scanning, setScanning] = useState(false);
   const [hasScanned, setHasScanned] = useState(false);
   const [deviceTypeFilter, setDeviceTypeFilter] = useState<DeviceTypeFilter>('all');
+  const [search, setSearch] = useState('');
   const [sort, setSort] = useState<{ key: SortKey; dir: SortDir } | null>(null);
   const [editingDevice, setEditingDevice] = useState<DiscoveredDevice | null>(null);
   const [rebootingDevice, setRebootingDevice] = useState<DiscoveredDevice | null>(null);
@@ -453,7 +466,11 @@ export function App() {
   // Built from the full scan (not the filtered list) so an ONVIF row's
   // label doesn't flip depending on whether its sibling passes the filter.
   const vendorRowHosts = vendorRowHostsOf(devices);
-  const visibleDevices = sortDevices(filterByDeviceType(devices, deviceTypeFilter, vendorRowHosts), sort, vendorRowHosts);
+  const visibleDevices = sortDevices(
+    filterByDeviceType(devices, deviceTypeFilter, vendorRowHosts).filter((d) => matchesSearch(d, search)),
+    sort,
+    vendorRowHosts,
+  );
 
   return (
     <div style={{ height: '100%', display: 'flex', flexDirection: 'column', background: theme.bg }}>
@@ -526,7 +543,25 @@ export function App() {
           }}
         >
           <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', justifySelf: 'start' }}>
-            <span style={{ fontSize: '11.5px', color: theme.textMuted }}>Device Type</span>
+            <div style={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
+              <input
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                placeholder="Search IP or MAC"
+                title="Filter the list by IP address or MAC address"
+                style={{ ...inputStyle, width: 168, padding: '0.3rem 1.4rem 0.3rem 0.5rem', fontSize: '12px' }}
+              />
+              {search && (
+                <button
+                  onClick={() => setSearch('')}
+                  title="Clear search"
+                  style={{ position: 'absolute', right: '0.3rem', background: 'none', border: 'none', color: theme.textMuted, cursor: 'pointer', fontSize: '14px', lineHeight: 1, padding: 0 }}
+                >
+                  ×
+                </button>
+              )}
+            </div>
+            <span style={{ fontSize: '11.5px', color: theme.textMuted, marginLeft: '0.3rem' }}>Device Type</span>
             <select
               value={deviceTypeFilter}
               onChange={(e) => setDeviceTypeFilter(e.target.value as DeviceTypeFilter)}
@@ -613,7 +648,8 @@ export function App() {
             )}
             {hasScanned && visibleDevices.length === 0 && (
               <div style={{ padding: '1.1rem', textAlign: 'center', color: theme.textFaint, fontSize: '12px' }}>
-                No devices found{deviceTypeFilter !== 'all' ? ' for this device type' : ' on the local network'}.
+                No devices {search.trim() ? 'match your search' : 'found'}
+                {!search.trim() && (deviceTypeFilter !== 'all' ? ' for this device type' : ' on the local network')}.
               </div>
             )}
             {visibleDevices.map((found, i) => {
@@ -663,9 +699,17 @@ export function App() {
                 <span style={{ ...cellStyle, ...columnStyle(columnWidths.actions, true), display: 'flex', gap: '0.75rem' }}>
                   <button
                     onClick={() => void window.ipTool.device.openWebPage(found.host)}
+                    title="Open in the in-app browser"
                     style={{ ...linkStyle, background: 'none', border: 'none', padding: 0, cursor: 'pointer' }}
                   >
                     Open
+                  </button>
+                  <button
+                    onClick={() => void window.ipTool.device.openWebPageExternal(found.host)}
+                    title="Open in your external browser"
+                    style={{ ...linkStyle, background: 'none', border: 'none', padding: 0, cursor: 'pointer' }}
+                  >
+                    Open ↗
                   </button>
                   <button onClick={() => setEditingDevice(editTargetFor(found, devices))} style={{ ...linkStyle, background: 'none', border: 'none', padding: 0, cursor: 'pointer' }}>
                     Edit
