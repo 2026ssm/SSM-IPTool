@@ -88,19 +88,30 @@ function filterByDeviceType(devices: DiscoveredDevice[], filter: DeviceTypeFilte
 // "Group by" dropdown per explicit request (see ColumnHeader).
 type SortKey = 'brand' | 'model' | 'host' | 'mac';
 
-type ColumnKey = 'brand' | 'model' | 'host' | 'mask' | 'gateway' | 'port' | 'mac' | 'via' | 'actions';
+type ColumnKey = 'type' | 'brand' | 'model' | 'host' | 'mask' | 'gateway' | 'port' | 'devicePort' | 'mac' | 'via' | 'actions';
+
+// The Device Type column label from the confirmed deviceCategory (see
+// shared/types.ts) — a dash when the discovering protocol didn't confirm one.
+function typeLabel(found: DiscoveredDevice): string {
+  if (found.deviceCategory === 'dvr_nvr') return 'DVR/NVR';
+  if (found.deviceCategory === 'ipc') return 'IPC';
+  if (found.deviceCategory === 'network') return 'Network';
+  return '—';
+}
 
 // Starting widths (px), sized to fit the 1100px default window; each column
 // can be dragged wider or narrower from its header's right edge (double-
 // click that edge to reset it), and the widths are remembered. The last
 // column takes whatever room is left.
 const COLUMNS: { key: ColumnKey; label: string; sortKey?: SortKey; width: number }[] = [
+  { key: 'type', label: 'Type', width: 72 },
   { key: 'brand', label: 'Brand', sortKey: 'brand', width: 60 },
   { key: 'model', label: 'Model', sortKey: 'model', width: 132 },
   { key: 'host', label: 'IP Address', sortKey: 'host', width: 132 },
   { key: 'mask', label: 'Subnet Mask', width: 100 },
   { key: 'gateway', label: 'Gateway', width: 98 },
   { key: 'port', label: 'HTTP Port', width: 64 },
+  { key: 'devicePort', label: 'Device Port', width: 76 },
   { key: 'mac', label: 'MAC Address', sortKey: 'mac', width: 125 },
   { key: 'via', label: 'Found Via', width: 92 },
   { key: 'actions', label: 'Actions', width: 124 },
@@ -436,9 +447,20 @@ export function App() {
             marginBottom: '0.6rem',
           }}
         >
-          <span style={{ fontSize: '12.5px', fontWeight: 600, color: theme.text }}>
-            Devices Found {hasScanned && `(${visibleDevices.length})`}
-          </span>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', justifySelf: 'start' }}>
+            <span style={{ fontSize: '11.5px', color: theme.textMuted }}>Device Type</span>
+            <select
+              value={deviceTypeFilter}
+              onChange={(e) => setDeviceTypeFilter(e.target.value as DeviceTypeFilter)}
+              style={selectStyle}
+            >
+              {DEVICE_TYPE_OPTIONS.map((opt) => (
+                <option key={opt.value} value={opt.value}>
+                  {opt.label}
+                </option>
+              ))}
+            </select>
+          </div>
 
           <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '0.3rem', justifySelf: 'center' }}>
             <button onClick={handleScan} disabled={scanning} style={{ ...primaryButtonStyle, opacity: scanning ? 0.6 : 1 }}>
@@ -453,20 +475,9 @@ export function App() {
             </label>
           </div>
 
-          <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', justifySelf: 'end' }}>
-            <span style={{ fontSize: '11.5px', color: theme.textMuted }}>Device Type</span>
-            <select
-              value={deviceTypeFilter}
-              onChange={(e) => setDeviceTypeFilter(e.target.value as DeviceTypeFilter)}
-              style={selectStyle}
-            >
-              {DEVICE_TYPE_OPTIONS.map((opt) => (
-                <option key={opt.value} value={opt.value}>
-                  {opt.label}
-                </option>
-              ))}
-            </select>
-          </div>
+          <span style={{ fontSize: '12.5px', fontWeight: 600, color: theme.text, justifySelf: 'end' }}>
+            Devices Found {hasScanned && `(${visibleDevices.length})`}
+          </span>
         </div>
 
         <div
@@ -527,6 +538,7 @@ export function App() {
               const resetTarget = factoryResetTargetFor(found, devices);
               return (
               <div key={`${found.host}-${found.discoveryMethod}-${i}`} style={{ ...rowStyle(false), padding: `0.5rem ${ROW_PADDING_X_PX}px` }}>
+                <span style={{ ...cellStyle, ...columnStyle(columnWidths.type, false) }}>{typeLabel(found)}</span>
                 <span style={{ ...cellStyle, ...columnStyle(columnWidths.brand, false) }}>{brandLabel(found, vendorRowHosts)}</span>
                 <span title={displayName(found)} style={{ ...cellStyle, ...columnStyle(columnWidths.model, false), color: theme.text }}>
                   {displayName(found)}
@@ -549,6 +561,7 @@ export function App() {
                 <span style={{ ...cellStyle, ...columnStyle(columnWidths.mask, false) }}>{found.subnetMask ?? '—'}</span>
                 <span style={{ ...cellStyle, ...columnStyle(columnWidths.gateway, false) }}>{found.gateway ?? '—'}</span>
                 <span style={{ ...cellStyle, ...columnStyle(columnWidths.port, false) }}>{httpPortOf(found) ?? '—'}</span>
+                <span style={{ ...cellStyle, ...columnStyle(columnWidths.devicePort, false) }}>{found.currentPorts?.device ?? '—'}</span>
                 <span style={{ ...cellStyle, ...columnStyle(columnWidths.mac, false) }}>{found.mac ?? '—'}</span>
                 <span title={found.discoveryMethod} style={{ ...cellStyle, ...columnStyle(columnWidths.via, false) }}>
                   {found.discoveryMethod}
