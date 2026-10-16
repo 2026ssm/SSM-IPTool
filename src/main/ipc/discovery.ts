@@ -58,6 +58,19 @@ function collapseToTwoPerHost(
   return [...brandByHost.values(), ...onvifByHost.values()];
 }
 
+// A device that answers a vendor's broadcast UNBRANDED — an OEM cross-answer,
+// e.g. a Digital Watchdog camera whose firmware replies to Uniview's
+// NETDEV_Discovery while its own manufacturer field is blank — but that ONVIF
+// positively identifies by scope (manufacturer/Digital Watchdog) is better
+// shown as its ONVIF row alone: branded correctly and edited over ONVIF, the
+// route that actually works for it. So the unbranded cross-answer row is
+// dropped. A branded vendor row (a real Uniview/Dahua/… match) or a host ONVIF
+// didn't identify is left untouched.
+function dropOnvifBrandedCrossAnswers(devices: DiscoveredDevice[]): DiscoveredDevice[] {
+  const onvifBrandedHosts = new Set(devices.filter((d) => d.discoveryMethod === 'ONVIF' && d.guessedVendor).map((d) => d.host));
+  return devices.filter((d) => d.discoveryMethod === 'ONVIF' || d.guessedVendor !== undefined || !onvifBrandedHosts.has(d.host));
+}
+
 // Axis cameras answer ONVIF WS-Discovery (branded 'axis' by its scope,
 // onvif://…/name/AXIS_…), but ship with ONVIF control disabled by default,
 // so they're edited over their own VAPIX HTTP API, not ONVIF. For each such
@@ -370,16 +383,18 @@ export function registerDiscoveryIpcHandlers(): void {
       runIsolated('Wi-Tek', async () => discoverWitekDevices()),
     ]);
     const rows = normalizeRows(
-      collapseToTwoPerHost(onvifResults, [
-        ...univiewResults,
-        ...hikvisionResults,
-        ...tvtResults,
-        ...dahuaResults,
-        ...ubiquitiResults,
-        ...witekResults,
-        ...deriveAxisRows(onvifResults),
-        ...deriveHanwhaRows(onvifResults),
-      ]),
+      dropOnvifBrandedCrossAnswers(
+        collapseToTwoPerHost(onvifResults, [
+          ...univiewResults,
+          ...hikvisionResults,
+          ...tvtResults,
+          ...dahuaResults,
+          ...ubiquitiResults,
+          ...witekResults,
+          ...deriveAxisRows(onvifResults),
+          ...deriveHanwhaRows(onvifResults),
+        ]),
+      ),
     );
     // The MAC fill-in talks to the network and spawns arp — contained like
     // each protocol above, so it can never throw the whole scan away.
