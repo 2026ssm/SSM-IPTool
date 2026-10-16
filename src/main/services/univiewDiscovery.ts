@@ -88,13 +88,21 @@ export async function discoverUniviewDevices(): Promise<DiscoveredDevice[]> {
   const seen: NativeDiscoveredDevice[] = [];
   loadNative().startDiscovery((device) => {
     seen.push(device);
-    const isConfirmedUniview = /^(unv|uniview)$/i.test(device.manufacturer.trim());
+    // A reply carrying a MAC + serial is a genuine Uniview-family device — the
+    // SDK fully identified it (and can modify it), and the serials are
+    // Uniview's own (210235…/219802…). That holds even when the manufacturer
+    // field is blank/"NONE", as on OEM-rebranded Uniview cameras (confirmed
+    // live: EM-IPCP4B4-F28-AD-AI and a stock IPC3614LR3, both MAC+serial,
+    // mfr=NONE). MAC-less replies are other cameras' ONVIF relayed through the
+    // SDK (SSM/IPCY, Tiandy, …) and are left unbranded. So brand by MAC+serial,
+    // or by an explicit UNV/UNIVIEW manufacturer field.
+    const isUniview = canModify(device) || /^(unv|uniview)$/i.test(device.manufacturer.trim());
     results.push({
       host: device.host,
       port: device.port,
       model: device.model,
-      manufacturer: isConfirmedUniview ? 'Uniview' : undefined,
-      guessedVendor: isConfirmedUniview ? 'uniview' : undefined,
+      manufacturer: isUniview ? 'Uniview' : undefined,
+      guessedVendor: isUniview ? 'uniview' : undefined,
       mac: device.mac || undefined,
       deviceCategory: categoryFromDeviceType(device.deviceType),
       discoveryMethod: 'Uniview',
