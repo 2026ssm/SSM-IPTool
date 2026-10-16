@@ -147,14 +147,29 @@ async function searchUntil(
   return { matched: false, last };
 }
 
-// ---- Ports: login + the device's own NVMS-9000 API ------------------------
+// ---- Ports: login + the device's own config API ---------------------------
 //
-// NET_SDK_GetDVRConfig/SetDVRConfig (DD_NETWORK_ADVANCE_CONFIG) are
-// documented "3.0 DVR only", so ports go through NET_SDK_TransparentConfig
-// instead, using the exact requests the device's own web UI sends — read
-// from the test NVR's js/app/NetCfg/port.js: queryNetPortCfg returns
-// httpPort/httpsPort/netPort/rtspPort/posPort (+ anonymousAccess,
-// virtualHostEnabled, reservedPort), and editNetPortCfg takes them all back.
+// NET_SDK_GetDVRConfig/SetDVRConfig (DD_NETWORK_ADVANCE_CONFIG) are documented
+// "3.0 DVR only", so ports go through NET_SDK_TransparentConfig using the exact
+// requests the device's own web UI sends. TVT devices speak one of two config
+// APIs, and which one depends on the device class:
+//   - NVR/DVR (NVMS-9000): queryNetPortCfg / editNetPortCfg, with an XML
+//     <request systemType="NVMS-9000">…<content>…</content></request> envelope.
+//     Ports: httpPort/httpsPort/netPort/rtspPort/posPort (+ anonymousAccess,
+//     virtualHostEnabled, reservedPort). Read from the test NVR's web UI
+//     (js/app/NetCfg/port.js). Reply status is an element <status>success</…>.
+//   - IPC (www.ipc.com): GetPortConfig / SetPortConfig, with an XML
+//     <config xmlns="http://www.ipc.com/ver10"><port>…</port></config> envelope
+//     (read-modify-write — GetPortConfig returns the block, SetPortConfig takes
+//     it back). Ports: httpPort/httpsPort/netPort/rtspPort/longPollingPort, each
+//     with a type="uint16" attribute. Read from the IPC's web UI
+//     (Scripts/ConfigMgr/Net/netAdvance.htm.js). Reply status is an ATTRIBUTE,
+//     status="success" on <config>.
+// Both name the device port <netPort>; only the command and envelope differ.
+// Sending the NVR commands to an IPC returns a www.ipc.com reply with
+// status="failed" errorCode="499" (unknown command) — which is why port changes
+// used to fail on TVT IPCs (confirmed live on an IPCT 4W-4MP at device port
+// 9008; the NVR path is confirmed on an ED8004H5).
 const TVT_REQUEST_OPEN = '<?xml version="1.0" encoding="utf-8" ?><request version="1.0"  systemType="NVMS-9000" clientType="WEB">';
 const TVT_EMPTY_REQUEST = '<?xml version="1.0" encoding="utf-8" ?><request version="1.0"  systemType="NVMS-9000" clientType="WEB"/>';
 
@@ -192,6 +207,90 @@ function tvtPortProblem(ports: Record<string, number>, reserved: string): string
   return undefined;
 }
 
+type TvtPortApi = 'nvr' | 'ipc';
+interface TvtPortState {
+  api: TvtPortApi;
+  // The device's own reply, kept whole for the IPC read-modify-write.
+  xml: string;
+  current: { http: number; https: number; net: number; rtsp: number };
+  // The NVR's reserved-port ranges; empty for the IPC (it reports none).
+  reserved: string;
+}
+
+function tvtPortsFrom(xml: string): TvtPortState['current'] {
+  const n = (tag: string): number => Number(xmlText(xml, tag) ?? 0);
+  return { http: n('httpPort'), https: n('httpsPort'), net: n('netPort'), rtsp: n('rtspPort') };
+}
+
+// Reads the device's current ports, trying the API its class suggests first
+// (IPCAMERA → www.ipc.com, else NVMS-9000) and falling back to the other, so an
+// OEM that reports an unexpected device type still works. Undefined when
+// neither API answers with a usable port list.
+async function readTvtPorts(native: NativeAddon, sessionId: number, deviceType: number): Promise<TvtPortState | undefined> {
+  const readNvr = async (): Promise<TvtPortState | undefined> => {
+    const q = await native.transparent(sessionId, 'queryNetPortCfg', TVT_EMPTY_REQUEST);
+    if (q.ok && q.xml && xmlText(q.xml, 'status') === 'success') {
+      return { api: 'nvr', xml: q.xml, current: tvtPortsFrom(q.xml), reserved: xmlText(q.xml, 'reservedPort') ?? '' };
+    }
+    return undefined;
+  };
+  const readIpc = async (): Promise<TvtPortState | undefined> => {
+    const g = await native.transparent(sessionId, 'GetPortConfig', '');
+    // The www.ipc.com reply has no <status> element — a failure is an attribute
+    // (status="failed"); a good reply carries the <port> block with <netPort>.
+    if (g.ok && g.xml && /<netPort[\s>]/i.test(g.xml) && !/\bstatus="failed"/i.test(g.xml)) {
+      return { api: 'ipc', xml: g.xml, current: tvtPortsFrom(g.xml), reserved: '' };
+    }
+    return undefined;
+  };
+  const order = deviceType === 2 ? [readIpc, readNvr] : [readNvr, readIpc];
+  for (const read of order) {
+    const state = await read();
+    if (state) return state;
+  }
+  return undefined;
+}
+
+// Replaces a leaf tag's text in place, keeping any attributes (the www.ipc.com
+// tags carry type="uint16"), for the IPC read-modify-write.
+function setXmlTag(xml: string, tag: string, value: number): string {
+  return xml.replace(new RegExp(`(<${tag}(?:\\s[^>]*)?>)[^<]*(</${tag}>)`), `$1${value}$2`);
+}
+
+// The request that writes the changed ports back, in the device's own schema.
+function buildTvtPortEdit(state: TvtPortState, changed: TvtPortState['current']): { command: string; body: string } {
+  if (state.api === 'ipc') {
+    let body = setXmlTag(state.xml, 'httpPort', changed.http);
+    body = setXmlTag(body, 'httpsPort', changed.https);
+    body = setXmlTag(body, 'netPort', changed.net);
+    body = setXmlTag(body, 'rtspPort', changed.rtsp);
+    return { command: 'SetPortConfig', body };
+  }
+  // NVR: send back everything the device reported, with only the requested
+  // ports replaced — optional fields only if the device has them.
+  const optional = ['posPort', 'anonymousAccess', 'virtualHostEnabled']
+    .map((tag) => [tag, xmlText(state.xml, tag)] as const)
+    .filter(([, value]) => value !== undefined)
+    .map(([tag, value]) => `<${tag}>${value}</${tag}>`)
+    .join('');
+  const body =
+    `${TVT_REQUEST_OPEN}<content><httpPort>${changed.http}</httpPort><httpsPort>${changed.https}</httpsPort>` +
+    `<netPort>${changed.net}</netPort><rtspPort>${changed.rtsp}</rtspPort>${optional}</content></request>`;
+  return { command: 'editNetPortCfg', body };
+}
+
+// The edit reply's status: an element <status>success</status> on the NVR, an
+// attribute status="success" on <config> for the IPC.
+function tvtEditStatus(api: TvtPortApi, xml: string | undefined): string | undefined {
+  if (!xml) return undefined;
+  return api === 'ipc' ? xml.match(/<config[^>]*\bstatus="([^"]*)"/i)?.[1] : xmlText(xml, 'status');
+}
+
+function tvtEditErrorCode(api: TvtPortApi, xml: string | undefined): string | undefined {
+  if (!xml) return undefined;
+  return api === 'ipc' ? xml.match(/\berrorCode="([^"]*)"/i)?.[1] : xmlText(xml, 'errorCode');
+}
+
 async function changeTvtPorts(device: NativeDiscoveredDevice, request: ModifyNetworkRequest, wanted: PortSettings): Promise<ModifyNetworkResult> {
   const native = loadNative();
   const login = await native.login({ host: device.host, port: device.port, username: request.username, password: request.password });
@@ -200,39 +299,45 @@ async function changeTvtPorts(device: NativeDiscoveredDevice, request: ModifyNet
     return { ok: false, error: TVT_LOGIN_ERRORS[code] ?? `Couldn't log in to the device (TVT error ${code}).` };
   }
   const sessionId = login.sessionId;
-  let changed: Record<string, number>;
+  const changed = { http: 0, https: 0, net: 0, rtsp: 0 };
   try {
-    const query = await native.transparent(sessionId, 'queryNetPortCfg', TVT_EMPTY_REQUEST);
-    if (!query.ok || !query.xml || xmlText(query.xml, 'status') !== 'success') {
-      return { ok: false, error: `This TVT device didn't return its port settings (queryNetPortCfg${query.errorCode ? `, error ${query.errorCode}` : ''}), so ports can't be changed from here.` };
+    const state = await readTvtPorts(native, sessionId, device.deviceType);
+    if (!state) {
+      return { ok: false, error: "This TVT device didn't return its port settings, so its ports can't be changed from here." };
     }
-    const current = (tag: string): number => Number(xmlText(query.xml as string, tag) ?? 0);
-    changed = {
-      httpPort: wanted.http ?? current('httpPort'),
-      httpsPort: wanted.https ?? current('httpsPort'),
-      netPort: wanted.device ?? current('netPort'),
-      rtspPort: wanted.rtsp ?? current('rtspPort'),
-      posPort: current('posPort'),
-    };
-    const problem = tvtPortProblem(changed, xmlText(query.xml, 'reservedPort') ?? '');
+    changed.http = wanted.http ?? state.current.http;
+    changed.https = wanted.https ?? state.current.https;
+    changed.net = wanted.device ?? state.current.net;
+    changed.rtsp = wanted.rtsp ?? state.current.rtsp;
+    const netPortChanged = changed.net !== state.current.net;
+
+    // The device's own web-UI checks: range, no two the same, none reserved.
+    const portsForCheck: Record<string, number> = { httpPort: changed.http, httpsPort: changed.https, netPort: changed.net, rtspPort: changed.rtsp };
+    if (state.api === 'nvr') {
+      const pos = Number(xmlText(state.xml, 'posPort') ?? 0);
+      if (pos > 0) portsForCheck.posPort = pos;
+    }
+    const problem = tvtPortProblem(portsForCheck, state.reserved);
     if (problem) return { ok: false, error: problem };
 
-    // Send back everything the device reported, with only the requested
-    // ports replaced — optional fields only if the device has them.
-    const optional = ['posPort', 'anonymousAccess', 'virtualHostEnabled']
-      .map((tag) => [tag, tag === 'posPort' ? String(changed.posPort) : xmlText(query.xml as string, tag)] as const)
-      .filter(([tag, value]) => value !== undefined && xmlText(query.xml as string, tag) !== undefined)
-      .map(([tag, value]) => `<${tag}>${value}</${tag}>`)
-      .join('');
-    const edit = await native.transparent(
-      sessionId,
-      'editNetPortCfg',
-      `${TVT_REQUEST_OPEN}<content><httpPort>${changed.httpPort}</httpPort><httpsPort>${changed.httpsPort}</httpsPort>` +
-        `<netPort>${changed.netPort}</netPort><rtspPort>${changed.rtspPort}</rtspPort>${optional}</content></request>`,
-    );
-    if (!edit.ok || !edit.xml || xmlText(edit.xml, 'status') !== 'success') {
-      const code = (edit.xml && xmlText(edit.xml, 'errorCode')) ?? edit.errorCode;
-      return { ok: false, error: `The device refused the port change${code ? ` (TVT error ${code})` : ''}.` };
+    const { command, body } = buildTvtPortEdit(state, changed);
+    const edit = await native.transparent(sessionId, command, body);
+    const editStatus = tvtEditStatus(state.api, edit.xml);
+    if (editStatus !== 'success') {
+      // Changing the device port (netPort) restarts the service this very login
+      // session runs over, so the device often drops the connection before its
+      // reply reaches us — a lost reply, not a refusal. (Confirmed by the
+      // symptom: HTTP-only changes, which don't restart that service, always
+      // reply cleanly; the device port, 9008 on IPCs, is where the session
+      // lives.) A lost reply falls through to the re-search below, which
+      // confirms the change from the device's own discovery reply. Only a reply
+      // that actually came back with a non-success status, or a failure on a
+      // change that isn't the device port, is a real refusal.
+      const deviceAnswered = editStatus !== undefined;
+      if (deviceAnswered || !netPortChanged) {
+        const code = tvtEditErrorCode(state.api, edit.xml) ?? edit.errorCode;
+        return { ok: false, error: `The device refused the port change${code ? ` (TVT error ${code})` : ''}.` };
+      }
     }
   } finally {
     // The session may already be gone if the device port just changed.
@@ -242,11 +347,11 @@ async function changeTvtPorts(device: NativeDiscoveredDevice, request: ModifyNet
   // HTTP and device ports show up in TVT's own search reply, so those can
   // be confirmed; HTTPS/RTSP rest on the device's "success".
   if (wanted.http === undefined && wanted.device === undefined) return { ok: true };
-  const { matched } = await searchUntil(device.mac, (d) => d.httpPort === changed.httpPort && d.port === changed.netPort);
+  const { matched } = await searchUntil(device.mac, (d) => d.httpPort === changed.http && d.port === changed.net);
   if (matched) return { ok: true };
   return {
     ok: true,
-    warning: `The device accepted the port change, but its search reply hasn't shown the new ports yet (HTTP ${changed.httpPort}, device ${changed.netPort}). Rescan in a minute to check.`,
+    warning: `The port change was sent, but the device's search reply hasn't shown the new ports yet (HTTP ${changed.http}, device ${changed.net}). Rescan in a minute to check.`,
   };
 }
 
