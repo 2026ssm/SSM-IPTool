@@ -339,7 +339,6 @@ export function App() {
   const [resolvedThemeMode, setResolvedThemeMode] = useState<'light' | 'dark'>('dark');
   const [windowMaximized, setWindowMaximized] = useState(false);
   const [aboutOpen, setAboutOpen] = useState(false);
-  const [portCheckOpen, setPortCheckOpen] = useState(false);
   const [now, setNow] = useState(() => new Date());
   const [devices, setDevices] = useState<DiscoveredDevice[]>([]);
   // The row the user clicked, highlighted with a light tint; kept by stable
@@ -515,8 +514,8 @@ export function App() {
           <IconButton title="About" onClick={() => setAboutOpen(true)}>
             &#9432;
           </IconButton>
-          <IconButton title="Port Forwarding Check" onClick={() => setPortCheckOpen(true)}>
-            🔌
+          <IconButton title="Print scan results" onClick={() => printScanResults(visibleDevices, vendorRowHosts)}>
+            🖨️
           </IconButton>
 
           <div style={{ width: '1px', height: '20px', background: theme.border, margin: '0 0.2rem' }} />
@@ -534,15 +533,9 @@ export function App() {
       </div>
 
       <div style={{ flex: 1, minHeight: 0, padding: '1.25rem', display: 'flex', flexDirection: 'column' }}>
-        <div
-          style={{
-            display: 'grid',
-            gridTemplateColumns: '1fr auto 1fr',
-            alignItems: 'center',
-            marginBottom: '0.6rem',
-          }}
-        >
-          <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', justifySelf: 'start' }}>
+        <div style={{ display: 'flex', alignItems: 'flex-end', gap: '1.25rem', marginBottom: '0.6rem' }}>
+          {/* Device Type — label on top of the selector, far left */}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
             <span style={{ fontSize: '11.5px', color: theme.textMuted }}>Device Type</span>
             <select
               value={deviceTypeFilter}
@@ -555,13 +548,20 @@ export function App() {
                 </option>
               ))}
             </select>
-            <div style={{ position: 'relative', display: 'flex', alignItems: 'center', marginLeft: '0.3rem' }}>
+          </div>
+
+          {/* Devices Found (green, flashing) on top of the Search field */}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
+            <span className="iptool-flash" style={{ fontSize: '12.5px', fontWeight: 700, color: theme.success }}>
+              Devices Found {hasScanned && `(${visibleDevices.length})`}
+            </span>
+            <div style={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
               <input
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
                 placeholder="Search IP or MAC"
                 title="Filter the list by IP address or MAC address"
-                style={{ ...inputStyle, width: 168, padding: '0.3rem 1.4rem 0.3rem 0.5rem', fontSize: '12px' }}
+                style={{ ...inputStyle, width: 190, padding: '0.35rem 1.4rem 0.35rem 0.5rem', fontSize: '12px' }}
               />
               {search && (
                 <button
@@ -575,7 +575,8 @@ export function App() {
             </div>
           </div>
 
-          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '0.3rem', justifySelf: 'center' }}>
+          {/* Scan + auto-scan */}
+          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '0.3rem' }}>
             <button onClick={handleScan} disabled={scanning} style={{ ...primaryButtonStyle, opacity: scanning ? 0.6 : 1 }}>
               {scanning ? 'Scanning…' : 'Scan Network'}
             </button>
@@ -588,15 +589,9 @@ export function App() {
             </label>
           </div>
 
-          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', justifySelf: 'end' }}>
-            <span style={{ fontSize: '12.5px', fontWeight: 600, color: theme.text }}>
-              Devices Found {hasScanned && `(${visibleDevices.length})`}
-            </span>
-            {visibleDevices.length > 0 && (
-              <IconButton title="Print scan results" onClick={() => printScanResults(visibleDevices, vendorRowHosts)}>
-                🖨️
-              </IconButton>
-            )}
+          {/* Port forwarding fields — fill the space to the right of Scan */}
+          <div style={{ flex: 1, display: 'flex', justifyContent: 'flex-start' }}>
+            <InlinePortCheck />
           </div>
         </div>
 
@@ -762,7 +757,6 @@ export function App() {
       {resettingDevice && <FactoryResetDialog device={resettingDevice} onClose={() => setResettingDevice(null)} />}
       {sadpResetDevice && <SadpResetDialog device={sadpResetDevice} onClose={() => setSadpResetDevice(null)} />}
       {aboutOpen && <AboutModal themeMode={resolvedThemeMode} onClose={() => setAboutOpen(false)} />}
-      {portCheckOpen && <PortCheckModal onClose={() => setPortCheckOpen(false)} />}
     </div>
   );
 }
@@ -840,23 +834,25 @@ function AboutModal({ themeMode, onClose }: { themeMode: 'light' | 'dark'; onClo
   );
 }
 
-function PortCheckModal({ onClose }: { onClose: () => void }) {
+// Inline port-forwarding check shown to the right of the Scan button: a
+// public-IP/domain field (auto-filled with the user's public IP, overwritable),
+// a port field, and a Check button that tests reachability from the internet.
+function InlinePortCheck() {
   const [host, setHost] = useState('');
   const [port, setPort] = useState('80');
   const [result, setResult] = useState<{ status: 'checking' | 'open' | 'closed' } | null>(null);
-  const [userIp, setUserIp] = useState('');
 
   useEffect(() => {
+    const fill = (data: { ip?: string }): void => {
+      if (data.ip) setHost((h) => h || (data.ip as string));
+    };
     fetch('https://api.ipify.org?format=json')
-      .then(r => r.json())
-      .then(data => {
-        setUserIp(data.ip);
-        setHost(data.ip);
-      })
+      .then((r) => r.json())
+      .then(fill)
       .catch(() => {
         fetch('https://api64.ipify.org?format=json')
-          .then(r => r.json())
-          .then(data => { setUserIp(data.ip); setHost(data.ip); })
+          .then((r) => r.json())
+          .then(fill)
           .catch(() => {});
       });
   }, []);
@@ -878,175 +874,40 @@ function PortCheckModal({ onClose }: { onClose: () => void }) {
       });
   };
 
+  const checking = result?.status === 'checking';
   return (
-    <div
-      onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }}
-      style={{
-        position: 'fixed',
-        inset: 0,
-        background: 'rgba(0, 0, 0, 0.55)',
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        zIndex: 1000,
-      }}
-    >
-      <div
-        style={{
-          width: 420,
-          background: theme.panel,
-          border: `1px solid ${theme.border}`,
-          borderRadius: '8px',
-          boxShadow: '0 16px 48px rgba(0, 0, 0, 0.5)',
-        }}
-      >
-        {/* Header */}
-        <div
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'space-between',
-            padding: '1rem 1.3rem',
-            borderBottom: `1px solid ${theme.border}`,
-          }}
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
+      <span style={{ fontSize: '11.5px', color: theme.textMuted }}>Port Forwarding Check</span>
+      <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+        <input
+          value={host}
+          onChange={(e) => setHost(e.target.value)}
+          onKeyDown={(e) => { if (e.key === 'Enter') handleCheck(); }}
+          placeholder="Public IP or domain"
+          title="Public IP or domain to check — auto-filled with your public IP; overwrite if needed"
+          style={{ ...inputStyle, width: 170, padding: '0.35rem 0.5rem', fontSize: '12px' }}
+        />
+        <input
+          value={port}
+          onChange={(e) => setPort(e.target.value)}
+          onKeyDown={(e) => { if (e.key === 'Enter') handleCheck(); }}
+          placeholder="Port"
+          title="Port to check"
+          style={{ ...inputStyle, width: 64, padding: '0.35rem 0.5rem', fontSize: '12px' }}
+        />
+        <button
+          onClick={handleCheck}
+          disabled={checking}
+          title="Check whether the port is open/reachable from the internet"
+          style={{ ...primaryButtonStyle, padding: '0.4rem 0.9rem', fontSize: '12px', opacity: checking ? 0.6 : 1 }}
         >
-          <span style={{ fontSize: '14px', fontWeight: 600, color: theme.text }}>🔌 Port Forwarding Check</span>
-          <button onClick={onClose} style={{ background: 'none', border: 'none', color: theme.textMuted, fontSize: '16px', cursor: 'pointer' }}>
-            &times;
-          </button>
-        </div>
-
-        {/* Body */}
-        <div style={{ padding: '1.3rem' }}>
-          {userIp && (
-            <div style={{ fontSize: '11px', color: theme.textMuted, marginBottom: '1rem', textAlign: 'center' }}>
-              Your IP: <strong style={{ color: theme.text }}>{userIp}</strong>
-            </div>
-          )}
-
-          {/* Host field */}
-          <div style={{ marginBottom: '0.8rem' }}>
-            <label style={{ display: 'block', fontSize: '12px', fontWeight: 600, color: theme.text, marginBottom: '0.3rem' }}>
-              IP Address or Domain
-            </label>
-            <input
-              type="text"
-              value={host}
-              onChange={e => setHost(e.target.value)}
-              onKeyDown={e => { if (e.key === 'Enter') handleCheck(); }}
-              placeholder="Enter IP or domain"
-              style={{
-                width: '100%',
-                padding: '8px 10px',
-                border: `1px solid ${theme.border}`,
-                borderRadius: '5px',
-                background: theme.surface,
-                color: theme.text,
-                fontSize: '13px',
-                boxSizing: 'border-box',
-                outline: 'none',
-              }}
-            />
-          </div>
-
-          {/* Port field + Check button */}
-          <div style={{ display: 'flex', gap: '0.6rem', marginBottom: '1rem' }}>
-            <div style={{ flex: 1 }}>
-              <label style={{ display: 'block', fontSize: '12px', fontWeight: 600, color: theme.text, marginBottom: '0.3rem' }}>
-                Port
-              </label>
-              <input
-                type="number"
-                value={port}
-                onChange={e => setPort(e.target.value)}
-                onKeyDown={e => { if (e.key === 'Enter') handleCheck(); }}
-                min={1}
-                max={65535}
-                style={{
-                  width: '100%',
-                  padding: '8px 10px',
-                  border: `1px solid ${theme.border}`,
-                  borderRadius: '5px',
-                  background: theme.surface,
-                  color: theme.text,
-                  fontSize: '13px',
-                  boxSizing: 'border-box',
-                  outline: 'none',
-                }}
-              />
-            </div>
-            <div style={{ display: 'flex', alignItems: 'flex-end' }}>
-              <button
-                onClick={handleCheck}
-                disabled={result?.status === 'checking'}
-                style={{
-                  padding: '8px 18px',
-                  border: 'none',
-                  borderRadius: '5px',
-                  background: result?.status === 'checking' ? theme.surfaceHover : theme.accent,
-                  color: theme.accentText,
-                  fontSize: '13px',
-                  fontWeight: 600,
-                  cursor: result?.status === 'checking' ? 'default' : 'pointer',
-                  whiteSpace: 'nowrap',
-                  opacity: result?.status === 'checking' ? 0.6 : 1,
-                }}
-              >
-                {result?.status === 'checking' ? 'Checking...' : 'Check Port'}
-              </button>
-            </div>
-          </div>
-
-          {/* Result */}
-          {result && (
-            <div
-              style={{
-                padding: '1rem',
-                borderRadius: '6px',
-                textAlign: 'center',
-                background: result.status === 'open'
-                  ? 'rgba(34, 197, 84, 0.1)'
-                  : result.status === 'closed'
-                  ? 'rgba(239, 68, 68, 0.1)'
-                  : theme.surface,
-                border: `1px solid ${
-                  result.status === 'open' ? 'rgba(34, 197, 84, 0.4)'
-                  : result.status === 'closed' ? 'rgba(239, 68, 68, 0.4)'
-                  : theme.border
-                }`,
-              }}
-            >
-              {result.status === 'checking' && (
-                <div style={{ fontSize: '13px', color: theme.textMuted }}>
-                  Checking port {port} on {host}...
-                </div>
-              )}
-              {result.status === 'open' && (
-                <>
-                  <div style={{ fontSize: '22px', marginBottom: '0.3rem' }}>✅</div>
-                  <div style={{ fontSize: '14px', fontWeight: 700, color: '#22c55e' }}>Port {port} is OPEN</div>
-                  <div style={{ fontSize: '12px', color: theme.textMuted, marginTop: '0.3rem' }}>
-                    Port {port} on {host} is accepting connections.
-                  </div>
-                </>
-              )}
-              {result.status === 'closed' && (
-                <>
-                  <div style={{ fontSize: '22px', marginBottom: '0.3rem' }}>❌</div>
-                  <div style={{ fontSize: '14px', fontWeight: 700, color: '#ef4444' }}>Port {port} is CLOSED</div>
-                  <div style={{ fontSize: '12px', color: theme.textMuted, marginTop: '0.3rem' }}>
-                    Port {port} on {host} is not accepting connections.
-                  </div>
-                </>
-              )}
-            </div>
-          )}
-
-          {/* Info */}
-          <div style={{ fontSize: '11px', color: theme.textFaint, marginTop: '1rem', lineHeight: 1.5 }}>
-            Makes a real TCP connection to test if the port is open and reachable from the internet.
-          </div>
-        </div>
+          {checking ? 'Checking…' : 'Check'}
+        </button>
+        {result && !checking && (
+          <span style={{ fontSize: '12px', fontWeight: 600, whiteSpace: 'nowrap', color: result.status === 'open' ? theme.success : theme.danger }}>
+            {result.status === 'open' ? '✅ Open' : '❌ Closed'}
+          </span>
+        )}
       </div>
     </div>
   );
