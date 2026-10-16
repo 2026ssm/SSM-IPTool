@@ -203,6 +203,24 @@ export async function rebootHanwhaDevice(request: RebootRequest): Promise<Modify
   }
 }
 
+// The camera's own web-UI port rules, checked before anything is sent so the
+// tech gets the same guidance the web page gives. Confirmed live on an
+// XNV-6011: RTSP must be 554 or 1024-65535, and 3702/4520/49152 are reserved.
+// HTTP/HTTPS are left to the shared validation in ipc/device.ts (1-65535, no
+// browser-bad ports).
+const HANWHA_RESERVED_RTSP = [3702, 4520, 49152];
+function hanwhaPortProblem(kind: PortKind, value: number): string | undefined {
+  if (kind === 'rtsp') {
+    if (value !== 554 && (value < 1024 || value > 65535)) {
+      return 'The RTSP port must be 554 or between 1024 and 65535 on Hanwha cameras.';
+    }
+    if (HANWHA_RESERVED_RTSP.includes(value)) {
+      return `Port ${value} is reserved on Hanwha cameras and can't be used for the RTSP port (reserved: ${HANWHA_RESERVED_RTSP.join(', ')}).`;
+    }
+  }
+  return undefined;
+}
+
 // ---- Modify ----
 
 export async function modifyHanwhaDevice(request: ModifyNetworkRequest): Promise<ModifyNetworkResult> {
@@ -232,6 +250,12 @@ export async function modifyHanwhaDevice(request: ModifyNetworkRequest): Promise
     // Which ports actually change, and to what (reading each submenu's current
     // value). HTTP is applied last, since changing it moves the web server.
     const kinds = wanted ? (Object.keys(wanted) as PortKind[]).filter((k) => wanted[k] !== undefined && PORT_SUBMENU[k]) : [];
+    // Check the camera's port rules before touching anything, so an invalid
+    // port is reported up front rather than after other changes applied.
+    for (const kind of kinds) {
+      const problem = hanwhaPortProblem(kind, wanted?.[kind] as number);
+      if (problem) return { ok: false, error: problem };
+    }
     const portChanges: { kind: PortKind; submenu: string; value: number }[] = [];
     for (const kind of kinds) {
       const submenu = PORT_SUBMENU[kind] as string;
