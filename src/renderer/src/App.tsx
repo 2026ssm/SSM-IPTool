@@ -191,14 +191,14 @@ function typeLabel(found: DiscoveredDevice, vendorRowHosts: Set<string>): string
 const COLUMNS: { key: ColumnKey; label: string; sortKey?: SortKey; width: number }[] = [
   { key: 'type', label: 'Type', sortKey: 'type', width: 72 },
   { key: 'brand', label: 'Brand', sortKey: 'brand', width: 60 },
-  { key: 'model', label: 'Model', sortKey: 'model', width: 132 },
+  { key: 'model', label: 'Model', sortKey: 'model', width: 118 },
   { key: 'host', label: 'IP Address', sortKey: 'host', width: 132 },
   { key: 'mask', label: 'Subnet Mask', width: 100 },
   { key: 'gateway', label: 'Gateway', width: 98 },
   { key: 'port', label: 'HTTP Port', width: 64 },
   { key: 'devicePort', label: 'Device Port', width: 76 },
-  { key: 'mac', label: 'MAC Address', sortKey: 'mac', width: 125 },
-  { key: 'via', label: 'Found Via', width: 92 },
+  { key: 'mac', label: 'MAC Address', sortKey: 'mac', width: 116 },
+  { key: 'via', label: 'Found Via', width: 82 },
   { key: 'actions', label: 'Actions', width: 124 },
 ];
 const MIN_COLUMN_WIDTH = 40;
@@ -537,11 +537,11 @@ export function App() {
           {/* LEFT: Device Type, then Devices Found + Search (labels centered) */}
           <div style={{ display: 'flex', alignItems: 'flex-end', gap: '1.25rem', justifySelf: 'start' }}>
             <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '0.25rem' }}>
-              <span style={{ fontSize: '11.5px', color: theme.textMuted }}>Device Type</span>
+              <span style={{ fontSize: '13px', fontWeight: 600, color: theme.textMuted }}>Device Type</span>
               <select
                 value={deviceTypeFilter}
                 onChange={(e) => setDeviceTypeFilter(e.target.value as DeviceTypeFilter)}
-                style={selectStyle}
+                style={{ ...selectStyle, fontSize: '13px' }}
               >
                 {DEVICE_TYPE_OPTIONS.map((opt) => (
                   <option key={opt.value} value={opt.value}>
@@ -552,7 +552,7 @@ export function App() {
             </div>
 
             <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '0.25rem' }}>
-              <span className="iptool-flash" style={{ fontSize: '12.5px', fontWeight: 700, color: theme.success }}>
+              <span className="iptool-flash" style={{ fontSize: '14px', fontWeight: 700, color: theme.success }}>
                 Devices Found {hasScanned && `(${visibleDevices.length})`}
               </span>
               <div style={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
@@ -561,7 +561,7 @@ export function App() {
                   onChange={(e) => setSearch(e.target.value)}
                   placeholder="Search IP or MAC"
                   title="Filter the list by IP address or MAC address"
-                  style={{ ...inputStyle, width: 190, padding: '0.35rem 1.4rem 0.35rem 0.5rem', fontSize: '12px' }}
+                  style={{ ...inputStyle, width: 200, padding: '0.4rem 1.4rem 0.4rem 0.55rem', fontSize: '13px' }}
                 />
                 {search && (
                   <button
@@ -580,12 +580,12 @@ export function App() {
           <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '0.3rem', justifySelf: 'center' }}>
             <label
               title="When on, the network is rescanned automatically every 10 seconds (paused while an Edit, Reboot, Factory reset or Reset-password dialog is open)."
-              style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', fontSize: '11px', color: theme.textMuted, cursor: 'pointer', whiteSpace: 'nowrap' }}
+              style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', fontSize: '12.5px', color: theme.textMuted, cursor: 'pointer', whiteSpace: 'nowrap' }}
             >
               <input type="checkbox" checked={autoScan} onChange={(e) => setAutoScan(e.target.checked)} />
               Auto-scan every 10s
             </label>
-            <button onClick={handleScan} disabled={scanning} style={{ ...primaryButtonStyle, opacity: scanning ? 0.6 : 1 }}>
+            <button onClick={handleScan} disabled={scanning} style={{ ...primaryButtonStyle, fontSize: '14px', opacity: scanning ? 0.6 : 1 }}>
               {scanning ? 'Scanning…' : 'Scan Network'}
             </button>
           </div>
@@ -869,7 +869,7 @@ function InlinePortCheck() {
   const checking = result?.status === 'checking';
   return (
     <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '0.25rem' }}>
-      <span style={{ fontSize: '11.5px', color: theme.textMuted }}>Port Forwarding Check</span>
+      <span style={{ fontSize: '13px', fontWeight: 600, color: theme.textMuted }}>Port Forwarding Check</span>
       <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
         <input
           value={host}
@@ -877,7 +877,7 @@ function InlinePortCheck() {
           onKeyDown={(e) => { if (e.key === 'Enter') handleCheck(); }}
           placeholder="Public IP or domain"
           title="Public IP or domain to check — auto-filled with your public IP; overwrite if needed"
-          style={{ ...inputStyle, width: 170, padding: '0.35rem 0.5rem', fontSize: '12px' }}
+          style={{ ...inputStyle, width: 180, padding: '0.4rem 0.55rem', fontSize: '13px' }}
         />
         <input
           value={port}
@@ -885,18 +885,18 @@ function InlinePortCheck() {
           onKeyDown={(e) => { if (e.key === 'Enter') handleCheck(); }}
           placeholder="Port"
           title="Port to check"
-          style={{ ...inputStyle, width: 64, padding: '0.35rem 0.5rem', fontSize: '12px' }}
+          style={{ ...inputStyle, width: 70, padding: '0.4rem 0.55rem', fontSize: '13px' }}
         />
         <button
           onClick={handleCheck}
           disabled={checking}
           title="Check whether the port is open/reachable from the internet"
-          style={{ ...primaryButtonStyle, padding: '0.4rem 0.9rem', fontSize: '12px', opacity: checking ? 0.6 : 1 }}
+          style={{ ...primaryButtonStyle, padding: '0.42rem 0.9rem', fontSize: '13px', opacity: checking ? 0.6 : 1 }}
         >
           {checking ? 'Checking…' : 'Check'}
         </button>
         {result && !checking && (
-          <span style={{ fontSize: '12px', fontWeight: 600, whiteSpace: 'nowrap', color: result.status === 'open' ? theme.success : theme.danger }}>
+          <span style={{ fontSize: '13px', fontWeight: 600, whiteSpace: 'nowrap', color: result.status === 'open' ? theme.success : theme.danger }}>
             {result.status === 'open' ? '✅ Open' : '❌ Closed'}
           </span>
         )}
