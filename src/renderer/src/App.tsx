@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type CSSProperties } from 'react';
 import { theme, applyThemeMode, getCurrentThemeMode, THEME_CHANGE_EVENT } from './theme';
 import { VENDOR_LABELS, realManufacturer } from '../../shared/types';
 import type { DeviceCategory, DiscoveredDevice, PortKind, PortSettings } from '../../shared/types';
@@ -48,6 +48,58 @@ function rowKey(found: DiscoveredDevice): string {
   return `${found.host}|${found.discoveryMethod}|${found.mac ?? ''}`;
 }
 
+function escapeHtmlText(value: string): string {
+  return value.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c] as string);
+}
+
+// Prints the given rows to the OS print dialog using one fixed template —
+// Brand, IP Address, HTTP Port, Device Port, MAC Address. Rendered in a hidden
+// same-origin iframe so only the table prints (not the app UI), then removed.
+function printScanResults(rows: DiscoveredDevice[], vendorRowHosts: Set<string>): void {
+  const cell = (v: string | number | undefined): string => `<td>${escapeHtmlText(String(v ?? '—'))}</td>`;
+  const body = rows
+    .map(
+      (r) =>
+        `<tr>${cell(brandLabel(r, vendorRowHosts))}${cell(r.host)}${cell(httpPortOf(r))}${cell(r.currentPorts?.device)}${cell(r.mac)}</tr>`,
+    )
+    .join('');
+  const when = new Date().toLocaleString();
+  const html =
+    `<!doctype html><html><head><meta charset="utf-8"><title>Scan Results</title><style>` +
+    `body{font-family:-apple-system,'Segoe UI',Roboto,sans-serif;color:#000;margin:24px}` +
+    `h1{font-size:16px;margin:0 0 2px}.when{font-size:11px;color:#444;margin:0 0 14px}` +
+    `table{border-collapse:collapse;width:100%;font-size:12px}` +
+    `th,td{border:1px solid #999;padding:5px 8px;text-align:left}th{background:#eee}` +
+    `</style></head><body>` +
+    `<h1>Network Scan Results</h1>` +
+    `<p class="when">${escapeHtmlText(when)} &middot; ${rows.length} device${rows.length === 1 ? '' : 's'}</p>` +
+    `<table><thead><tr><th>Brand</th><th>IP Address</th><th>HTTP Port</th><th>Device Port</th><th>MAC Address</th></tr></thead>` +
+    `<tbody>${body}</tbody></table></body></html>`;
+
+  const iframe = document.createElement('iframe');
+  iframe.setAttribute('aria-hidden', 'true');
+  iframe.style.cssText = 'position:fixed;right:0;bottom:0;width:0;height:0;border:0;';
+  document.body.appendChild(iframe);
+  const win = iframe.contentWindow;
+  const doc = win?.document;
+  if (!win || !doc) {
+    iframe.remove();
+    return;
+  }
+  doc.open();
+  doc.write(html);
+  doc.close();
+  const cleanup = (): void => iframe.remove();
+  win.onafterprint = cleanup;
+  // A tick for the iframe to lay out, then print; a long fallback removes it
+  // even if onafterprint never fires (e.g. the dialog is dismissed).
+  setTimeout(() => {
+    win.focus();
+    win.print();
+    setTimeout(cleanup, 60000);
+  }, 150);
+}
+
 // An ONVIF row for a host that also has a vendor-protocol row is the
 // secondary/duplicate entry for the same device — labelled "ONVIF" per
 // explicit request so the pair reads as brand row + ONVIF row, instead of
@@ -92,7 +144,7 @@ function filterByDeviceType(devices: DiscoveredDevice[], filter: DeviceTypeFilte
 // Click a column header to sort by it — the same sortable-header pattern as
 // SSM-VMS's own Device Management tables, replacing the earlier standalone
 // "Group by" dropdown per explicit request (see ColumnHeader).
-type SortKey = 'brand' | 'model' | 'host' | 'mac';
+type SortKey = 'brand' | 'type' | 'model' | 'host' | 'mac';
 
 type ColumnKey = 'type' | 'brand' | 'model' | 'host' | 'mask' | 'gateway' | 'port' | 'devicePort' | 'mac' | 'via' | 'actions';
 
@@ -122,7 +174,7 @@ function typeLabel(found: DiscoveredDevice, vendorRowHosts: Set<string>): string
 // click that edge to reset it), and the widths are remembered. The last
 // column takes whatever room is left.
 const COLUMNS: { key: ColumnKey; label: string; sortKey?: SortKey; width: number }[] = [
-  { key: 'type', label: 'Type', width: 112 },
+  { key: 'type', label: 'Type', sortKey: 'type', width: 72 },
   { key: 'brand', label: 'Brand', sortKey: 'brand', width: 60 },
   { key: 'model', label: 'Model', sortKey: 'model', width: 132 },
   { key: 'host', label: 'IP Address', sortKey: 'host', width: 132 },
@@ -242,6 +294,8 @@ function sortValueFor(found: DiscoveredDevice, key: SortKey, vendorRowHosts: Set
   switch (key) {
     case 'brand':
       return brandLabel(found, vendorRowHosts);
+    case 'type':
+      return typeLabel(found, vendorRowHosts);
     case 'model':
       return displayName(found);
     case 'host':
@@ -496,9 +550,16 @@ export function App() {
             </label>
           </div>
 
-          <span style={{ fontSize: '12.5px', fontWeight: 600, color: theme.text, justifySelf: 'end' }}>
-            Devices Found {hasScanned && `(${visibleDevices.length})`}
-          </span>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', justifySelf: 'end' }}>
+            <span style={{ fontSize: '12.5px', fontWeight: 600, color: theme.text }}>
+              Devices Found {hasScanned && `(${visibleDevices.length})`}
+            </span>
+            {visibleDevices.length > 0 && (
+              <IconButton title="Print scan results" onClick={() => printScanResults(visibleDevices, vendorRowHosts)}>
+                🖨️
+              </IconButton>
+            )}
+          </div>
         </div>
 
         <div
@@ -537,22 +598,6 @@ export function App() {
                 onSort={toggleSort}
                 onResizeStart={(x) => startColumnResize(column.key, x)}
                 onResetWidth={() => resetColumnWidth(column.key)}
-                headerControl={
-                  column.key === 'type' ? (
-                    <select
-                      value={deviceTypeFilter}
-                      onChange={(e) => setDeviceTypeFilter(e.target.value as DeviceTypeFilter)}
-                      title="Filter by device type"
-                      style={{ ...selectStyle, width: '100%', fontSize: '11px', padding: '2px 4px', fontWeight: 600 }}
-                    >
-                      {DEVICE_TYPE_OPTIONS.map((opt) => (
-                        <option key={opt.value} value={opt.value}>
-                          {opt.label}
-                        </option>
-                      ))}
-                    </select>
-                  ) : undefined
-                }
               />
             ))}
           </div>
@@ -1897,7 +1942,6 @@ function ColumnHeader({
   onSort,
   onResizeStart,
   onResetWidth,
-  headerControl,
 }: {
   label: string;
   sortKey?: SortKey;
@@ -1907,31 +1951,28 @@ function ColumnHeader({
   onSort: (key: SortKey) => void;
   onResizeStart: (clientX: number) => void;
   onResetWidth: () => void;
-  headerControl?: ReactNode;
 }) {
   const active = sortKey !== undefined && sort?.key === sortKey;
   return (
     <div style={{ ...columnStyle(width, last), position: 'relative', overflow: 'visible' }}>
-      {headerControl ?? (
-        <span
-          onClick={sortKey ? () => onSort(sortKey) : undefined}
-          title={label}
-          style={{
-            ...cellStyle,
-            fontWeight: 600,
-            cursor: sortKey ? 'pointer' : 'default',
-            userSelect: 'none',
-            display: 'flex',
-            alignItems: 'center',
-            gap: '0.3rem',
-            overflow: 'hidden',
-            whiteSpace: 'nowrap',
-          }}
-        >
-          <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>{label}</span>
-          {sortKey && <span style={{ fontSize: '10px', opacity: active ? 1 : 0.3 }}>{active ? (sort!.dir === 'asc' ? '▲' : '▼') : '▲'}</span>}
-        </span>
-      )}
+      <span
+        onClick={sortKey ? () => onSort(sortKey) : undefined}
+        title={label}
+        style={{
+          ...cellStyle,
+          fontWeight: 600,
+          cursor: sortKey ? 'pointer' : 'default',
+          userSelect: 'none',
+          display: 'flex',
+          alignItems: 'center',
+          gap: '0.3rem',
+          overflow: 'hidden',
+          whiteSpace: 'nowrap',
+        }}
+      >
+        <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>{label}</span>
+        {sortKey && <span style={{ fontSize: '10px', opacity: active ? 1 : 0.3 }}>{active ? (sort!.dir === 'asc' ? '▲' : '▼') : '▲'}</span>}
+      </span>
       {!last && (
         <div
           onMouseDown={(e) => {
