@@ -1273,7 +1273,7 @@ function EditDeviceDialog({
             <Field label={capability.username ? 'Password' : 'Admin Password'}>
               <PasswordInput value={password} onChange={setPassword} />
             </Field>
-            {(device.discoveryMethod === 'Uniview' || device.discoveryMethod === 'Axis') && (
+            {(device.discoveryMethod === 'Uniview' || device.discoveryMethod === 'Axis' || device.discoveryMethod === 'Hanwha') && (
               <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
                 <button
                   type="button"

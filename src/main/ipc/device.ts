@@ -9,6 +9,7 @@ import { readUniviewNetworkViaLapi, factoryResetUniviewViaLapi } from '../servic
 import { modifyOnvifDevice, readOnvifHttpPort, readOnvifNetwork, rebootOnvifDevice, factoryResetOnvifDevice, hasOnvifService } from '../services/onvifNetwork';
 import { modifyHikvisionDevice, rebootHikvisionDevice, factoryResetHikvisionDevice } from '../services/hikvisionIsapi';
 import { modifyAxisDevice, readAxisNetworkForPrefill, rebootAxisDevice } from '../services/axisVapix';
+import { modifyHanwhaDevice, readHanwhaNetworkForPrefill, rebootHanwhaDevice } from '../services/hanwhaSunapi';
 import { hasGateway, localIPv4Interfaces } from '../services/networkInterfaces';
 import { lastScanHosts, lastScanRowsFor } from '../services/scanResults';
 import type { FactoryResetRequest, ModifyNetworkRequest, ModifyNetworkResult, PortKind, PortSettings, RebootRequest } from '../../shared/types';
@@ -176,6 +177,15 @@ export function registerDeviceIpcHandlers(): void {
           return { error: e instanceof Error ? e.message : String(e) };
         }
       }
+      if (discoveryMethod === 'Hanwha') {
+        const row = lastScanRowsFor(host).find((r) => r.discoveryMethod === 'Hanwha');
+        const port = row?.currentPorts?.http ?? row?.httpPort ?? 80;
+        try {
+          return await readHanwhaNetworkForPrefill(host, port, { username: username.trim(), password });
+        } catch (e) {
+          return { error: e instanceof Error ? e.message : String(e) };
+        }
+      }
       if (discoveryMethod !== 'Uniview') return {};
       const row = lastScanRowsFor(host).find((r) => r.discoveryMethod === 'Uniview');
       const port = row?.currentPorts?.http ?? row?.port ?? 80;
@@ -231,6 +241,7 @@ export function registerDeviceIpcHandlers(): void {
     try {
       if (request.discoveryMethod === 'Hikvision SADP') return await rebootHikvisionDevice(request);
       if (request.discoveryMethod === 'Axis') return await rebootAxisDevice(request);
+      if (request.discoveryMethod === 'Hanwha') return await rebootHanwhaDevice(request);
       const tvt = lastScanRowsFor(request.host).find((d) => d.discoveryMethod === 'TVT');
       if (request.discoveryMethod === 'TVT' && tvt?.deviceCategory !== 'ipc') return await rebootTvtDevice(request);
       return await rebootOnvifDevice(request);
@@ -291,6 +302,8 @@ export function registerDeviceIpcHandlers(): void {
           return await modifyHikvisionDevice(request);
         case 'Axis':
           return await modifyAxisDevice(request);
+        case 'Hanwha':
+          return await modifyHanwhaDevice(request);
         case 'ONVIF':
           return await modifyOnvifDevice(request);
         default:

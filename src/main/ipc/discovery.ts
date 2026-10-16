@@ -83,6 +83,26 @@ function deriveAxisRows(onvifResults: DiscoveredDevice[]): DiscoveredDevice[] {
     }));
 }
 
+// Hanwha (Wisenet) cameras answer ONVIF (scope "Hanwha Techwin"), but are
+// edited over their own SUNAPI HTTP API (see hanwhaSunapi.ts), not ONVIF —
+// same reasoning and shape as deriveAxisRows above. SUNAPI applies IP and port
+// changes without a reboot, so mayReboot is left off.
+function deriveHanwhaRows(onvifResults: DiscoveredDevice[]): DiscoveredDevice[] {
+  return onvifResults
+    .filter((d) => d.guessedVendor === 'hanwha')
+    .map((d): DiscoveredDevice => ({
+      host: d.host,
+      httpPort: d.httpPort,
+      model: d.model,
+      manufacturer: d.manufacturer,
+      mac: d.mac,
+      guessedVendor: 'hanwha',
+      discoveryMethod: 'Hanwha',
+      currentPorts: d.currentPorts,
+      networkEdit: { ports: ['http', 'https', 'rtsp'], dns: false, username: true, dhcp: true },
+    }));
+}
+
 // Normalizes every row's MAC to one format (see normalizeMac) and flags
 // devices outside every local subnet. Both are pure, so they run before —
 // and survive a failure of — the ARP step below.
@@ -223,6 +243,14 @@ function adjustEditCapabilities(devices: DiscoveredDevice[]): DiscoveredDevice[]
           "This Axis camera is outside this PC's subnet. Its settings are changed through its own VAPIX web API, which only reaches devices on the PC's subnet — put the PC on the device's subnet first.",
       };
     }
+    if (device.otherSubnet && device.networkEdit && device.discoveryMethod === 'Hanwha') {
+      return {
+        ...device,
+        networkEdit: undefined,
+        editUnavailableReason:
+          "This Hanwha camera is outside this PC's subnet. Its settings are changed through its own SUNAPI web API, which only reaches devices on the PC's subnet — put the PC on the device's subnet first.",
+      };
+    }
     if (device.otherSubnet && device.networkEdit && device.discoveryMethod === 'Hikvision SADP') {
       return {
         ...device,
@@ -267,8 +295,8 @@ function markRebootable(devices: DiscoveredDevice[]): DiscoveredDevice[] {
   return devices.map((device) => {
     if (device.otherSubnet) return device;
     const rebootable =
-      device.discoveryMethod === 'Hikvision SADP' || device.discoveryMethod === 'Axis'
-        ? device.networkEdit !== undefined // ISAPI / VAPIX restart, on the PC's subnet
+      device.discoveryMethod === 'Hikvision SADP' || device.discoveryMethod === 'Axis' || device.discoveryMethod === 'Hanwha'
+        ? device.networkEdit !== undefined // ISAPI / VAPIX / SUNAPI restart, on the PC's subnet
         : device.discoveryMethod === 'TVT' && device.deviceCategory !== 'ipc'
           ? true
           : onvifHosts.has(device.host);
@@ -350,6 +378,7 @@ export function registerDiscoveryIpcHandlers(): void {
         ...ubiquitiResults,
         ...witekResults,
         ...deriveAxisRows(onvifResults),
+        ...deriveHanwhaRows(onvifResults),
       ]),
     );
     // The MAC fill-in talks to the network and spawns arp — contained like

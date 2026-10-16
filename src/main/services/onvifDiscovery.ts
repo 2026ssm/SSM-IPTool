@@ -45,6 +45,10 @@ function guessVendor(text: string): VendorId | undefined {
   // Axis names its ONVIF scope "AXIS <model>" (onvif://www.onvif.org/name/
   // AXIS_M3065-V), so the brand is right in the WS-Discovery reply.
   if (lower.includes('axis')) return 'axis';
+  // Hanwha's scope says manufacturer/Hanwha%20Techwin (confirmed live on an
+  // XNV-6011); "techwin" also catches the older Samsung Techwin, "wisenet"
+  // the product line.
+  if (lower.includes('hanwha') || lower.includes('techwin') || lower.includes('wisenet')) return 'hanwha';
   return undefined;
 }
 

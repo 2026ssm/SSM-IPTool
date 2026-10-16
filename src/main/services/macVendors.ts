@@ -21,6 +21,10 @@ import { normalizeMac } from './arpLookup';
 //     cameras answer ONVIF WS-Discovery (branded by scope there too), but
 //     ship with ONVIF control disabled by default, so they're edited over
 //     their own VAPIX HTTP API (see axisVapix.ts), not ONVIF.
+//   - Hanwha (Hanwha Vision, formerly Hanwha/Samsung Techwin — Wisenet) —
+//     E4:30:22 confirmed live (XNV-6011), plus the older Samsung Techwin
+//     00:09:18. They answer ONVIF (scope "Hanwha Techwin") and are edited
+//     over their own SUNAPI HTTP API (see hanwhaSunapi.ts).
 const PREFIXES: [VendorId, string[]][] = [
   [
     'dahua',
@@ -33,6 +37,7 @@ const PREFIXES: [VendorId, string[]][] = [
   ['sunell', ['00:1C:27']],
   ['witek', ['54:3D:92']],
   ['axis', ['00:40:8C', 'AC:CC:8E', 'B8:A4:4F', 'E8:27:25']],
+  ['hanwha', ['E4:30:22', '00:09:18']],
   [
     'ubiquiti',
     [
