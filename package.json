@@ -1,6 +1,6 @@
 {
   "name": "simplified-iptool",
-  "version": "1.4.1",
+  "version": "1.4.2",
   "description": "Network scanner utility for identifying DVR/NVR/IP camera devices by vendor",
   "private": true,
   "main": "./out/main/index.js",
