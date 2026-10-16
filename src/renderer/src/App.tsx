@@ -166,6 +166,9 @@ function typeLabel(found: DiscoveredDevice, vendorRowHosts: Set<string>): string
   if (category === 'dvr_nvr') return 'DVR/NVR';
   if (category === 'ipc') return 'IPC';
   if (category === 'network') return 'Network';
+  // Not otherwise categorized but found over ONVIF — name it ONVIF rather than
+  // leaving it blank (the generic/duplicate ONVIF rows).
+  if (found.discoveryMethod === 'ONVIF') return 'ONVIF';
   return '—';
 }
 
