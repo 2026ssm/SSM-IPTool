@@ -57,6 +57,20 @@ function guessVendor(text: string): VendorId | undefined {
   return undefined;
 }
 
+// A scope value (model/manufacturer) made readable: percent-decoded and with
+// underscores turned to spaces. decodeURIComponent throws on malformed input,
+// so it's guarded.
+function decodeScope(value: string | undefined): string | undefined {
+  if (!value) return undefined;
+  let decoded = value;
+  try {
+    decoded = decodeURIComponent(value);
+  } catch {
+    // keep the raw value
+  }
+  return decoded.replace(/_/g, ' ').trim() || undefined;
+}
+
 function extractTag(xml: string, tag: string): string {
   const match = xml.match(new RegExp(`<[^:>]*:?${tag}[^>]*>([\\s\\S]*?)<\\/[^:>]*:?${tag}>`, 'i'));
   return match?.[1]?.trim() ?? '';
@@ -111,6 +125,11 @@ export function discoverOnvifDevices(): Promise<DiscoveredDevice[]> {
       const portMatch = xaddrs.match(/:(\d+)\//);
       const modelMatch = scopes.match(/onvif:\/\/www\.onvif\.org\/hardware\/(\S+)/i);
       const nameMatch = scopes.match(/onvif:\/\/www\.onvif\.org\/name\/(\S+)/i);
+      // The manufacturer scope is the authoritative brand (e.g.
+      // manufacturer/Digital%20Watchdog) — the name scope is often a generic
+      // display name ("IP-Camera"), so prefer the manufacturer scope and fall
+      // back to the name scope only when it's missing.
+      const mfrMatch = scopes.match(/onvif:\/\/www\.onvif\.org\/manufacturer\/(\S+)/i);
       // Many devices (every Uniview seen on the test network) put their own
       // MAC in a macaddr scope — the device's own claim, so used directly.
       const macMatch = scopes.match(/onvif:\/\/www\.onvif\.org\/macaddr\/([0-9a-f:.-]{12,17})(?:\s|$)/i);
@@ -120,8 +139,8 @@ export function discoverOnvifDevices(): Promise<DiscoveredDevice[]> {
       found.set(rinfo.address, {
         host: rinfo.address,
         httpPort: asPort(portMatch?.[1]),
-        model: modelMatch?.[1]?.replace(/_/g, ' '),
-        manufacturer: nameMatch?.[1]?.replace(/_/g, ' '),
+        model: decodeScope(modelMatch?.[1]),
+        manufacturer: decodeScope(mfrMatch?.[1]) ?? decodeScope(nameMatch?.[1]),
         mac: macMatch?.[1],
         guessedVendor: guessVendor(`${scopes} ${xaddrs}`),
         discoveryMethod: 'ONVIF',

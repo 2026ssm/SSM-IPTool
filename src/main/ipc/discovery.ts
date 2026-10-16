@@ -11,6 +11,7 @@ import { isOnLocalSubnet, localIPv4Interfaces } from '../services/networkInterfa
 import { vendorFromMac } from '../services/macVendors';
 import { readOnvifScanInfo } from '../services/onvifNetwork';
 import { setLastScan } from '../services/scanResults';
+import { realManufacturer } from '../../shared/types';
 import type { DiscoveredDevice, FactoryResetCapability } from '../../shared/types';
 
 // Originally left fully unmerged (one row per protocol match, however many
@@ -67,7 +68,9 @@ function collapseToTwoPerHost(
 // dropped. A branded vendor row (a real Uniview/Dahua/… match) or a host ONVIF
 // didn't identify is left untouched.
 function dropOnvifBrandedCrossAnswers(devices: DiscoveredDevice[]): DiscoveredDevice[] {
-  const onvifBrandedHosts = new Set(devices.filter((d) => d.discoveryMethod === 'ONVIF' && d.guessedVendor).map((d) => d.host));
+  const onvifBrandedHosts = new Set(
+    devices.filter((d) => d.discoveryMethod === 'ONVIF' && (d.guessedVendor || realManufacturer(d.manufacturer))).map((d) => d.host),
+  );
   return devices.filter((d) => d.discoveryMethod === 'ONVIF' || d.guessedVendor !== undefined || !onvifBrandedHosts.has(d.host));
 }
 

@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type CSSProperties } from 'react';
 import { theme, applyThemeMode, getCurrentThemeMode, THEME_CHANGE_EVENT } from './theme';
-import { VENDOR_LABELS } from '../../shared/types';
+import { VENDOR_LABELS, realManufacturer } from '../../shared/types';
 import type { DeviceCategory, DiscoveredDevice, PortKind, PortSettings } from '../../shared/types';
 import logoWhite from './assets/logo-white.png';
 import logoNavy from './assets/logo-navy.png';
@@ -50,6 +50,10 @@ function brandLabel(found: DiscoveredDevice, vendorRowHosts: Set<string>): strin
   if (found.discoveryMethod === 'ONVIF' && vendorRowHosts.has(found.host)) return VENDOR_LABELS.onvif;
   if (found.guessedVendor) return VENDOR_LABELS[found.guessedVendor];
   if (found.model?.trim().toUpperCase().startsWith('IPCY')) return 'SSM';
+  // A brand we don't specifically support, named from the ONVIF manufacturer
+  // scan so the tech can still identify it (and Open its web page).
+  const mfr = realManufacturer(found.manufacturer);
+  if (mfr) return mfr;
   return '—';
 }
 
@@ -516,7 +520,12 @@ export function App() {
                 No devices found{deviceTypeFilter !== 'all' ? ' for this device type' : ' on the local network'}.
               </div>
             )}
-            {visibleDevices.map((found, i) => (
+            {visibleDevices.map((found, i) => {
+              // Reboot and Factory reset are always shown for a uniform row,
+              // disabled (greyed) when the device doesn't support them.
+              const rebootTarget = rebootTargetFor(found, devices);
+              const resetTarget = factoryResetTargetFor(found, devices);
+              return (
               <div key={`${found.host}-${found.discoveryMethod}-${i}`} style={{ ...rowStyle(false), padding: `0.5rem ${ROW_PADDING_X_PX}px` }}>
                 <span style={{ ...cellStyle, ...columnStyle(columnWidths.brand, false) }}>{brandLabel(found, vendorRowHosts)}</span>
                 <span title={displayName(found)} style={{ ...cellStyle, ...columnStyle(columnWidths.model, false), color: theme.text }}>
@@ -554,23 +563,22 @@ export function App() {
                   <button onClick={() => setEditingDevice(editTargetFor(found, devices))} style={{ ...linkStyle, background: 'none', border: 'none', padding: 0, cursor: 'pointer' }}>
                     Edit
                   </button>
-                  {rebootTargetFor(found, devices) && (
-                    <button
-                      onClick={() => setRebootingDevice(rebootTargetFor(found, devices) ?? null)}
-                      style={{ ...linkStyle, background: 'none', border: 'none', padding: 0, cursor: 'pointer' }}
-                    >
-                      Reboot
-                    </button>
-                  )}
-                  {factoryResetTargetFor(found, devices) && (
-                    <button
-                      onClick={() => setResettingDevice(factoryResetTargetFor(found, devices) ?? null)}
-                      title="Restore this device to its factory defaults"
-                      style={{ ...linkStyle, background: 'none', border: 'none', padding: 0, cursor: 'pointer' }}
-                    >
-                      Factory reset…
-                    </button>
-                  )}
+                  <button
+                    onClick={rebootTarget ? () => setRebootingDevice(rebootTarget) : undefined}
+                    disabled={!rebootTarget}
+                    title={rebootTarget ? 'Reboot this device' : "Reboot isn't available for this device"}
+                    style={{ ...linkStyle, background: 'none', border: 'none', padding: 0, cursor: rebootTarget ? 'pointer' : 'default', opacity: rebootTarget ? 1 : 0.35 }}
+                  >
+                    Reboot
+                  </button>
+                  <button
+                    onClick={resetTarget ? () => setResettingDevice(resetTarget) : undefined}
+                    disabled={!resetTarget}
+                    title={resetTarget ? 'Restore this device to its factory defaults' : "Factory reset isn't available for this device"}
+                    style={{ ...linkStyle, background: 'none', border: 'none', padding: 0, cursor: resetTarget ? 'pointer' : 'default', opacity: resetTarget ? 1 : 0.35 }}
+                  >
+                    Factory reset…
+                  </button>
                   {found.passwordReset && (
                     <button
                       onClick={() => setSadpResetDevice(found)}
@@ -582,7 +590,8 @@ export function App() {
                   )}
                 </span>
               </div>
-            ))}
+              );
+            })}
           </div>
           </div>
         </div>

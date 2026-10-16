@@ -16,6 +16,17 @@ export const VENDOR_LABELS: Record<VendorId, string> = {
   onvif: 'ONVIF',
 };
 
+// A real device manufacturer from an ONVIF manufacturer scope, or undefined
+// for the generic placeholders cameras use when they don't report a real one.
+// Lets the table name a brand we don't otherwise support (identify + Open),
+// from what the ONVIF scan reports.
+export function realManufacturer(name: string | undefined): string | undefined {
+  const m = name?.trim();
+  if (!m) return undefined;
+  if (/^(none|n\/a|na|unknown|unidentified|generic|ip[\s-]?camera|ipc)$/i.test(m)) return undefined;
+  return m;
+}
+
 export type ThemeMode = 'light' | 'dark' | 'auto';
 
 // One entry per discovery PROTOCOL that answered, not one per physical
