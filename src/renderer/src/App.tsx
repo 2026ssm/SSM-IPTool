@@ -543,7 +543,19 @@ export function App() {
           }}
         >
           <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', justifySelf: 'start' }}>
-            <div style={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
+            <span style={{ fontSize: '11.5px', color: theme.textMuted }}>Device Type</span>
+            <select
+              value={deviceTypeFilter}
+              onChange={(e) => setDeviceTypeFilter(e.target.value as DeviceTypeFilter)}
+              style={selectStyle}
+            >
+              {DEVICE_TYPE_OPTIONS.map((opt) => (
+                <option key={opt.value} value={opt.value}>
+                  {opt.label}
+                </option>
+              ))}
+            </select>
+            <div style={{ position: 'relative', display: 'flex', alignItems: 'center', marginLeft: '0.3rem' }}>
               <input
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
@@ -561,18 +573,6 @@ export function App() {
                 </button>
               )}
             </div>
-            <span style={{ fontSize: '11.5px', color: theme.textMuted, marginLeft: '0.3rem' }}>Device Type</span>
-            <select
-              value={deviceTypeFilter}
-              onChange={(e) => setDeviceTypeFilter(e.target.value as DeviceTypeFilter)}
-              style={selectStyle}
-            >
-              {DEVICE_TYPE_OPTIONS.map((opt) => (
-                <option key={opt.value} value={opt.value}>
-                  {opt.label}
-                </option>
-              ))}
-            </select>
           </div>
 
           <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '0.3rem', justifySelf: 'center' }}>
