@@ -49,6 +49,11 @@ function guessVendor(text: string): VendorId | undefined {
   // XNV-6011); "techwin" also catches the older Samsung Techwin, "wisenet"
   // the product line.
   if (lower.includes('hanwha') || lower.includes('techwin') || lower.includes('wisenet')) return 'hanwha';
+  // Digital Watchdog's scope says manufacturer/Digital%20Watchdog (confirmed
+  // live on a DWC-MV72Di28T). DW OEMs its hardware, so its MAC OUI isn't
+  // DW-specific — the ONVIF scope is the reliable signal. DW has no native
+  // API, so it's edited over the generic ONVIF path (no derived brand row).
+  if (lower.includes('watchdog')) return 'dw';
   return undefined;
 }
 

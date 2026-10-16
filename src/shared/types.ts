@@ -1,6 +1,6 @@
 // Types shared across main, preload, and renderer (IPC payload shapes).
 
-export type VendorId = 'hikvision' | 'dahua' | 'tvt' | 'uniview' | 'sunell' | 'ubiquiti' | 'witek' | 'axis' | 'hanwha' | 'onvif';
+export type VendorId = 'hikvision' | 'dahua' | 'tvt' | 'uniview' | 'sunell' | 'ubiquiti' | 'witek' | 'axis' | 'hanwha' | 'dw' | 'onvif';
 
 export const VENDOR_LABELS: Record<VendorId, string> = {
   hikvision: 'HIK',
@@ -12,6 +12,7 @@ export const VENDOR_LABELS: Record<VendorId, string> = {
   witek: 'WITEK',
   axis: 'AXIS',
   hanwha: 'HANWHA',
+  dw: 'DW',
   onvif: 'ONVIF',
 };
 
