@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type CSSProperties } from 'react';
+import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react';
 import { theme, applyThemeMode, getCurrentThemeMode, THEME_CHANGE_EVENT } from './theme';
 import { VENDOR_LABELS, realManufacturer } from '../../shared/types';
 import type { DeviceCategory, DiscoveredDevice, PortKind, PortSettings } from '../../shared/types';
@@ -83,10 +83,10 @@ const DEVICE_TYPE_OPTIONS: { value: DeviceTypeFilter; label: string }[] = [
   { value: 'onvif', label: 'ONVIF' },
 ];
 
-function filterByDeviceType(devices: DiscoveredDevice[], filter: DeviceTypeFilter): DiscoveredDevice[] {
+function filterByDeviceType(devices: DiscoveredDevice[], filter: DeviceTypeFilter, vendorRowHosts: Set<string>): DiscoveredDevice[] {
   if (filter === 'all') return devices;
   if (filter === 'onvif') return devices.filter((d) => d.discoveryMethod === 'ONVIF');
-  return devices.filter((d) => d.deviceCategory === filter);
+  return devices.filter((d) => effectiveCategory(d, vendorRowHosts) === filter);
 }
 
 // Click a column header to sort by it — the same sortable-header pattern as
@@ -96,12 +96,24 @@ type SortKey = 'brand' | 'model' | 'host' | 'mac';
 
 type ColumnKey = 'type' | 'brand' | 'model' | 'host' | 'mask' | 'gateway' | 'port' | 'devicePort' | 'mac' | 'via' | 'actions';
 
-// The Device Type column label from the confirmed deviceCategory (see
-// shared/types.ts) — a dash when the discovering protocol didn't confirm one.
-function typeLabel(found: DiscoveredDevice): string {
-  if (found.deviceCategory === 'dvr_nvr') return 'DVR/NVR';
-  if (found.deviceCategory === 'ipc') return 'IPC';
-  if (found.deviceCategory === 'network') return 'Network';
+// The device's type for the Type column and filter. The SDK-confirmed category
+// wins (Uniview/TVT 'ipc'/'dvr_nvr', Ubiquiti/Wi-Tek 'network'); otherwise any
+// row that shows a real brand — a camera we identified but whose protocol
+// didn't report a category (Hikvision, Dahua, Axis, Hanwha, DW, other ONVIF
+// manufacturers) — is treated as an IPC. The generic "ONVIF" duplicate rows
+// and unidentified ('—') rows stay untyped (they filter under ONVIF/All only).
+function effectiveCategory(found: DiscoveredDevice, vendorRowHosts: Set<string>): DeviceCategory | undefined {
+  if (found.deviceCategory) return found.deviceCategory;
+  const label = brandLabel(found, vendorRowHosts);
+  if (label === VENDOR_LABELS.onvif || label === '—') return undefined;
+  return 'ipc';
+}
+
+function typeLabel(found: DiscoveredDevice, vendorRowHosts: Set<string>): string {
+  const category = effectiveCategory(found, vendorRowHosts);
+  if (category === 'dvr_nvr') return 'DVR/NVR';
+  if (category === 'ipc') return 'IPC';
+  if (category === 'network') return 'Network';
   return '—';
 }
 
@@ -110,7 +122,7 @@ function typeLabel(found: DiscoveredDevice): string {
 // click that edge to reset it), and the widths are remembered. The last
 // column takes whatever room is left.
 const COLUMNS: { key: ColumnKey; label: string; sortKey?: SortKey; width: number }[] = [
-  { key: 'type', label: 'Type', width: 72 },
+  { key: 'type', label: 'Type', width: 112 },
   { key: 'brand', label: 'Brand', sortKey: 'brand', width: 60 },
   { key: 'model', label: 'Model', sortKey: 'model', width: 132 },
   { key: 'host', label: 'IP Address', sortKey: 'host', width: 132 },
@@ -384,7 +396,7 @@ export function App() {
   // Built from the full scan (not the filtered list) so an ONVIF row's
   // label doesn't flip depending on whether its sibling passes the filter.
   const vendorRowHosts = vendorRowHostsOf(devices);
-  const visibleDevices = sortDevices(filterByDeviceType(devices, deviceTypeFilter), sort, vendorRowHosts);
+  const visibleDevices = sortDevices(filterByDeviceType(devices, deviceTypeFilter, vendorRowHosts), sort, vendorRowHosts);
 
   return (
     <div style={{ height: '100%', display: 'flex', flexDirection: 'column', background: theme.bg }}>
@@ -525,6 +537,22 @@ export function App() {
                 onSort={toggleSort}
                 onResizeStart={(x) => startColumnResize(column.key, x)}
                 onResetWidth={() => resetColumnWidth(column.key)}
+                headerControl={
+                  column.key === 'type' ? (
+                    <select
+                      value={deviceTypeFilter}
+                      onChange={(e) => setDeviceTypeFilter(e.target.value as DeviceTypeFilter)}
+                      title="Filter by device type"
+                      style={{ ...selectStyle, width: '100%', fontSize: '11px', padding: '2px 4px', fontWeight: 600 }}
+                    >
+                      {DEVICE_TYPE_OPTIONS.map((opt) => (
+                        <option key={opt.value} value={opt.value}>
+                          {opt.label}
+                        </option>
+                      ))}
+                    </select>
+                  ) : undefined
+                }
               />
             ))}
           </div>
@@ -556,7 +584,7 @@ export function App() {
                   cursor: 'pointer',
                 }}
               >
-                <span style={{ ...cellStyle, ...columnStyle(columnWidths.type, false) }}>{typeLabel(found)}</span>
+                <span style={{ ...cellStyle, ...columnStyle(columnWidths.type, false) }}>{typeLabel(found, vendorRowHosts)}</span>
                 <span style={{ ...cellStyle, ...columnStyle(columnWidths.brand, false) }}>{brandLabel(found, vendorRowHosts)}</span>
                 <span title={displayName(found)} style={{ ...cellStyle, ...columnStyle(columnWidths.model, false), color: theme.text }}>
                   {displayName(found)}
@@ -1869,6 +1897,7 @@ function ColumnHeader({
   onSort,
   onResizeStart,
   onResetWidth,
+  headerControl,
 }: {
   label: string;
   sortKey?: SortKey;
@@ -1878,28 +1907,31 @@ function ColumnHeader({
   onSort: (key: SortKey) => void;
   onResizeStart: (clientX: number) => void;
   onResetWidth: () => void;
+  headerControl?: ReactNode;
 }) {
   const active = sortKey !== undefined && sort?.key === sortKey;
   return (
     <div style={{ ...columnStyle(width, last), position: 'relative', overflow: 'visible' }}>
-      <span
-        onClick={sortKey ? () => onSort(sortKey) : undefined}
-        title={label}
-        style={{
-          ...cellStyle,
-          fontWeight: 600,
-          cursor: sortKey ? 'pointer' : 'default',
-          userSelect: 'none',
-          display: 'flex',
-          alignItems: 'center',
-          gap: '0.3rem',
-          overflow: 'hidden',
-          whiteSpace: 'nowrap',
-        }}
-      >
-        <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>{label}</span>
-        {sortKey && <span style={{ fontSize: '10px', opacity: active ? 1 : 0.3 }}>{active ? (sort!.dir === 'asc' ? '▲' : '▼') : '▲'}</span>}
-      </span>
+      {headerControl ?? (
+        <span
+          onClick={sortKey ? () => onSort(sortKey) : undefined}
+          title={label}
+          style={{
+            ...cellStyle,
+            fontWeight: 600,
+            cursor: sortKey ? 'pointer' : 'default',
+            userSelect: 'none',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '0.3rem',
+            overflow: 'hidden',
+            whiteSpace: 'nowrap',
+          }}
+        >
+          <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>{label}</span>
+          {sortKey && <span style={{ fontSize: '10px', opacity: active ? 1 : 0.3 }}>{active ? (sort!.dir === 'asc' ? '▲' : '▼') : '▲'}</span>}
+        </span>
+      )}
       {!last && (
         <div
           onMouseDown={(e) => {
