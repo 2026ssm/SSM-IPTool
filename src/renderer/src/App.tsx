@@ -42,6 +42,12 @@ function displayName(found: DiscoveredDevice): string {
   return isUsableModel(found.model) ? found.model : 'Unknown device';
 }
 
+// A stable identity for a scanned row (host + protocol + MAC), used to keep a
+// row selected across re-sorts and rescans — unlike the render index.
+function rowKey(found: DiscoveredDevice): string {
+  return `${found.host}|${found.discoveryMethod}|${found.mac ?? ''}`;
+}
+
 // An ONVIF row for a host that also has a vendor-protocol row is the
 // secondary/duplicate entry for the same device — labelled "ONVIF" per
 // explicit request so the pair reads as brand row + ONVIF row, instead of
@@ -255,6 +261,9 @@ export function App() {
   const [portCheckOpen, setPortCheckOpen] = useState(false);
   const [now, setNow] = useState(() => new Date());
   const [devices, setDevices] = useState<DiscoveredDevice[]>([]);
+  // The row the user clicked, highlighted with a light tint; kept by stable
+  // key so it survives sorting and rescans.
+  const [selectedKey, setSelectedKey] = useState<string | null>(null);
   const [scanning, setScanning] = useState(false);
   const [hasScanned, setHasScanned] = useState(false);
   const [deviceTypeFilter, setDeviceTypeFilter] = useState<DeviceTypeFilter>('all');
@@ -537,7 +546,16 @@ export function App() {
               const rebootTarget = rebootTargetFor(found, devices);
               const resetTarget = factoryResetTargetFor(found, devices);
               return (
-              <div key={`${found.host}-${found.discoveryMethod}-${i}`} style={{ ...rowStyle(false), padding: `0.5rem ${ROW_PADDING_X_PX}px` }}>
+              <div
+                key={`${found.host}-${found.discoveryMethod}-${i}`}
+                onClick={() => setSelectedKey(rowKey(found))}
+                style={{
+                  ...rowStyle(false),
+                  padding: `0.5rem ${ROW_PADDING_X_PX}px`,
+                  background: selectedKey === rowKey(found) ? theme.accentFaint : 'transparent',
+                  cursor: 'pointer',
+                }}
+              >
                 <span style={{ ...cellStyle, ...columnStyle(columnWidths.type, false) }}>{typeLabel(found)}</span>
                 <span style={{ ...cellStyle, ...columnStyle(columnWidths.brand, false) }}>{brandLabel(found, vendorRowHosts)}</span>
                 <span title={displayName(found)} style={{ ...cellStyle, ...columnStyle(columnWidths.model, false), color: theme.text }}>
