@@ -90,6 +90,17 @@ function validate(request: ModifyNetworkRequest): string | undefined {
       if (ports[i][1] === ports[j][1]) return `${PORT_LABELS[ports[i][0]]} and ${PORT_LABELS[ports[j][0]]} ports can't both be ${ports[i][1]}.`;
     }
   }
+
+  // Hanwha (Wisenet) and Digital Watchdog restrict the RTSP port to 554 or
+  // 1024-65535 and reserve 3702/4520/49152 (confirmed live on both; their web
+  // UIs show the same error). Keyed to the camera's brand since the two share
+  // the rule but take different edit routes (Hanwha SUNAPI, DW generic ONVIF).
+  const rtsp = request.ports?.rtsp;
+  if (rtsp !== undefined && lastScanRowsFor(request.host).some((r) => r.guessedVendor === 'hanwha' || r.guessedVendor === 'dw')) {
+    if (rtsp !== 554 && (rtsp < 1024 || rtsp > 65535)) return 'The RTSP port must be 554 or between 1024 and 65535 on this camera.';
+    if ([3702, 4520, 49152].includes(rtsp)) return `Port ${rtsp} is reserved on this camera and can't be used for the RTSP port (3702, 4520, 49152).`;
+  }
+
   if (!request.password) return "The device's password is required.";
   return undefined;
 }
